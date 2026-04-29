@@ -1,5 +1,13 @@
 # FlowBraid 开发规范
 
+## 必读文档
+每次开始任务前，先按下面顺序阅读：
+1. `AGENTS.md`
+2. `doc/progress.md`
+3. `doc/requirements.md`
+4. `doc/architecture.md`
+5. `doc/tech-stack.md`
+
 ## 核心目标
 - 本地优先，离线可用。
 - 跨平台，优先保证 Windows 和 macOS/Linux 都能跑通。
