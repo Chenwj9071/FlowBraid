@@ -85,11 +85,23 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
   if (node.id && node.id !== nodeId) {
     throw new WorkflowError(`节点 ${nodeId} 的 id 字段必须与键名一致`);
   }
-  if (node.type !== 'shell' && node.type !== 'gate' && node.type !== 'end') {
+  if (node.type !== 'shell' && node.type !== 'gate' && node.type !== 'approval' && node.type !== 'codex' && node.type !== 'end') {
     throw new WorkflowError(`节点 ${nodeId} 的 type 不合法: ${String((node as { type?: string }).type)}`);
   }
   if (node.type === 'shell' && (typeof node.command !== 'string' || node.command.trim() === '')) {
     throw new WorkflowError(`shell 节点 ${nodeId} 必须提供 command`);
+  }
+  if (node.type === 'codex') {
+    if ((node.mode !== 'exec' && node.mode !== 'review') || typeof node.prompt !== 'string' || node.prompt.trim() === '') {
+      throw new WorkflowError(`codex 节点 ${nodeId} 必须提供 mode(exec|review) 和非空 prompt`);
+    }
+  }
+  if (node.type === 'approval') {
+    const approve = node.transitions?.approve;
+    const reject = node.transitions?.reject;
+    if (typeof approve !== 'string' || approve.trim() === '' || typeof reject !== 'string' || reject.trim() === '') {
+      throw new WorkflowError(`approval 节点 ${nodeId} 必须提供 transitions.approve 和 transitions.reject`);
+    }
   }
 }
 
@@ -125,3 +137,13 @@ export function resolveNodeNext(node: WorkflowNodeDefinition, outcome: 'success'
   return null;
 }
 
+export function resolveApprovalNext(node: WorkflowNodeDefinition, decision: 'approve' | 'reject'): string | null {
+  const map = node.transitions ?? {};
+  if (decision === 'approve' && typeof map.approve === 'string') {
+    return map.approve;
+  }
+  if (decision === 'reject' && typeof map.reject === 'string') {
+    return map.reject;
+  }
+  return null;
+}

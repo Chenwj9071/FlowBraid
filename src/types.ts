@@ -1,4 +1,4 @@
-export type NodeKind = 'shell' | 'gate' | 'end';
+export type NodeKind = 'shell' | 'gate' | 'approval' | 'codex' | 'end';
 
 export interface WorkflowDefinition {
   id: string;
@@ -16,6 +16,8 @@ export interface WorkflowBaseNode {
     success?: string;
     failure?: string;
     default?: string;
+    approve?: string;
+    reject?: string;
   };
 }
 
@@ -25,8 +27,22 @@ export interface ShellNodeDefinition extends WorkflowBaseNode {
   cwd?: string;
 }
 
+export interface CodexNodeDefinition extends WorkflowBaseNode {
+  type: 'codex';
+  mode: 'exec' | 'review';
+  prompt: string;
+  cwd?: string;
+  model?: string;
+  outputFile?: string;
+}
+
 export interface GateNodeDefinition extends WorkflowBaseNode {
   type: 'gate';
+  prompt?: string;
+}
+
+export interface ApprovalNodeDefinition extends WorkflowBaseNode {
+  type: 'approval';
   prompt?: string;
 }
 
@@ -35,7 +51,12 @@ export interface EndNodeDefinition extends WorkflowBaseNode {
   message?: string;
 }
 
-export type WorkflowNodeDefinition = ShellNodeDefinition | GateNodeDefinition | EndNodeDefinition;
+export type WorkflowNodeDefinition =
+  | ShellNodeDefinition
+  | CodexNodeDefinition
+  | GateNodeDefinition
+  | ApprovalNodeDefinition
+  | EndNodeDefinition;
 
 export type NodeStatus = 'pending' | 'running' | 'paused' | 'succeeded' | 'failed' | 'closed';
 export type RunStatus = 'running' | 'paused' | 'completed' | 'failed';
@@ -94,5 +115,6 @@ export interface RunnerOptions {
   defaultWorkdir?: string;
   logger?: (line: string) => void;
   maxSteps?: number;
+  codexCommand?: string;
+  approvalDecision?: 'approve' | 'reject';
 }
-

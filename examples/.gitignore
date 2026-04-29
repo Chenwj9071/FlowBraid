@@ -1,0 +1,6 @@
+.flowbraid-runs/
+demo-workdir/
+prepare.txt
+finish.txt
+*.log
+

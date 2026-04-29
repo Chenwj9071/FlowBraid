@@ -25,7 +25,8 @@ FlowBraid 分成四层：
 
 ### 4. Executors
 - 首版先实现 `shell` 执行器。
-- `codex` 和 `claude` 作为后续执行器适配入口。
+- `codex` 作为首个 agent 执行器，封装开发和 code review 两类工作。
+- `claude` 仍保留为后续执行器适配入口。
 - 执行器统一处理：启动、标准输出、标准错误、退出码、资源关闭。
 
 ### 5. State and Messaging
@@ -39,6 +40,8 @@ FlowBraid 分成四层：
 3. 以 workflow 文件所在目录作为默认工作目录，并在该目录下创建 run workspace。
 4. 从 start 节点开始执行。
 5. shell 节点运行完成后进入下一跳。
-6. gate 节点暂停流程并落盘。
-7. resume 后继续执行后续节点。
-8. 遇到 end 节点后结束运行。
+6. codex 节点调用本地 Codex CLI，产出代码修改或审核摘要。
+7. gate 节点暂停流程并落盘。
+8. approval 节点在 resume 时消费人工决策，按 approve / reject 选择下一跳。
+9. resume 后继续执行后续节点。
+10. 遇到 end 节点后结束运行。
