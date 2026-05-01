@@ -3,15 +3,18 @@ import path from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { loadWorkflowFile, WorkflowError } from './workflow.js';
-import { loadManifest, loadRunState } from './workspace.js';
-import { startWorkflow, resumeWorkflow } from './engine.js';
+import { loadManifest, loadRunState, persistRunState } from './workspace.js';
+import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
+import { RunInterruptedError } from './errors.js';
+import { appendText, nowIso } from './utils.js';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
 
 用法:
   flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive]
-  flowbraid resume <run-dir> [--decision approve|reject] [--codex-command <cmd>]
+  flowbraid resume <run-dir> [--decision approve|reject] [--message <text>] [--codex-command <cmd>]
+  flowbraid send <run-dir> <message> [--codex-command <cmd>]
   flowbraid validate <workflow-file>`);
 }
 
@@ -37,7 +40,10 @@ function parseArgs(argv: string[]): { command?: string; rest: string[]; flags: R
   return { command, rest: positional, flags };
 }
 
-async function promptApprovalDecision(runDir: string): Promise<'approve' | 'reject'> {
+async function promptApprovalDecision(
+  runDir: string,
+  abortSignal?: AbortSignal,
+): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
   const { workspace, manifest } = await loadManifest(runDir);
   const state = await loadRunState(workspace);
   const currentNodeId = state.currentNodeId;
@@ -53,10 +59,26 @@ async function promptApprovalDecision(runDir: string): Promise<'approve' | 'reje
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     while (true) {
-      const answer = await rl.question('审批结果 [approve/reject]: ');
+      const answer = await Promise.race([
+        rl.question('审批结果 [approve/reject]: '),
+        createAbortPromise(abortSignal, () => rl.close()),
+      ]);
       const normalized = answer.trim().toLowerCase();
       if (normalized === 'approve' || normalized === 'reject') {
-        return normalized;
+        if (normalized === 'reject') {
+          while (true) {
+            const feedback = await Promise.race([
+              rl.question('请输入打回意见: '),
+              createAbortPromise(abortSignal, () => rl.close()),
+            ]);
+            const trimmed = feedback.trim();
+            if (trimmed) {
+              return { decision: normalized, comment: trimmed };
+            }
+            console.log('reject 时必须提供打回意见');
+          }
+        }
+        return { decision: normalized };
       }
       console.log('请输入 approve 或 reject');
     }
@@ -65,16 +87,43 @@ async function promptApprovalDecision(runDir: string): Promise<'approve' | 'reje
   }
 }
 
-async function promptGateContinue(promptText: string): Promise<void> {
+async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     if (promptText) {
       console.log(promptText);
     }
-    const answer = await rl.question('按回车继续，输入 q 退出: ');
+    const answer = await Promise.race([
+      rl.question('按回车继续，输入 q 退出: '),
+      createAbortPromise(abortSignal, () => rl.close()),
+    ]);
     if (answer.trim().toLowerCase() === 'q') {
       throw new Error('用户取消继续执行');
     }
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await Promise.race([
+      rl.question('agent> '),
+      createAbortPromise(abortSignal, () => rl.close()),
+    ]);
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await Promise.race([
+      rl.question('message> '),
+      createAbortPromise(abortSignal, () => rl.close()),
+    ]);
   } finally {
     rl.close();
   }
@@ -86,14 +135,19 @@ async function runInteractiveWorkflow(
     workspaceRoot?: string;
     defaultWorkdir?: string;
     codexCommand?: string;
+    abortSignal?: AbortSignal;
+    onRunDir?: (runDir: string) => void;
   },
 ): Promise<Awaited<ReturnType<typeof startWorkflow>>> {
   let result = await startWorkflow(workflow, {
     workspaceRoot: options.workspaceRoot,
     defaultWorkdir: options.defaultWorkdir,
     codexCommand: options.codexCommand,
+    abortSignal: options.abortSignal,
+    interactiveTerminal: { input: process.stdin, output: process.stdout },
     logger: (line) => console.log(line),
   });
+  options.onRunDir?.(result.runDir);
 
   while (result.status === 'paused') {
     const { workspace, manifest } = await loadManifest(result.runDir);
@@ -106,21 +160,46 @@ async function runInteractiveWorkflow(
     }
 
     if (currentNode.type === 'approval') {
-      const decision = await promptApprovalDecision(result.runDir);
+      const approval = await promptApprovalDecision(result.runDir, options.abortSignal);
       result = await resumeWorkflow(result.runDir, {
-        approvalDecision: decision,
+        approvalDecision: approval.decision,
+        approvalComment: approval.comment,
         codexCommand: options.codexCommand,
+        abortSignal: options.abortSignal,
+        interactiveTerminal: { input: process.stdin, output: process.stdout },
         logger: (line) => console.log(line),
       });
+      options.onRunDir?.(result.runDir);
       continue;
     }
 
     if (currentNode.type === 'gate') {
-      await promptGateContinue(currentNode.prompt ?? '');
+      await promptGateContinue(currentNode.prompt ?? '', options.abortSignal);
       result = await resumeWorkflow(result.runDir, {
         codexCommand: options.codexCommand,
+        abortSignal: options.abortSignal,
+        interactiveTerminal: { input: process.stdin, output: process.stdout },
         logger: (line) => console.log(line),
       });
+      options.onRunDir?.(result.runDir);
+      continue;
+    }
+
+    if (currentNode.type === 'agent_session') {
+      console.log('agent_session 等待继续输入，输入 /exit 可暂时退出当前会话。');
+      const message = (await promptAgentSessionMessage(options.abortSignal)).trim();
+      if (!message || message === '/exit') {
+        console.log(`run ${result.runId} => ${result.status}`);
+        console.log(`workspace: ${result.runDir}`);
+        return result;
+      }
+      result = await sendWorkflow(result.runDir, message, {
+        codexCommand: options.codexCommand,
+        abortSignal: options.abortSignal,
+        interactiveTerminal: { input: process.stdin, output: process.stdout },
+        logger: (line) => console.log(line),
+      });
+      options.onRunDir?.(result.runDir);
       continue;
     }
 
@@ -155,33 +234,50 @@ async function main(): Promise<number> {
       if (!filePath) {
         throw new Error('run 需要 workflow 文件路径');
       }
+
       const workflow = await loadWorkflowFile(path.resolve(filePath));
       const shouldInteractive =
         flags.interactive === true ||
         (flags['no-interactive'] !== true && process.stdin.isTTY && process.stdout.isTTY);
+      const interruptContext = createInterruptContext();
 
-      if (shouldInteractive) {
-        const result = await runInteractiveWorkflow(workflow, {
+      try {
+        if (shouldInteractive) {
+          const result = await runInteractiveWorkflow(workflow, {
+            workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
+            defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
+            codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+            abortSignal: interruptContext.controller.signal,
+            onRunDir: (runDir) => {
+              interruptContext.lastRunDir = runDir;
+            },
+          });
+          return result.status === 'failed' ? 1 : 0;
+        }
+
+        const result = await startWorkflow(workflow, {
           workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
           defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
           codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+          abortSignal: interruptContext.controller.signal,
+          logger: (line) => console.log(line),
         });
+        interruptContext.lastRunDir = result.runDir;
+        console.log(`run ${result.runId} => ${result.status}`);
+        console.log(`workspace: ${result.runDir}`);
+        if (result.status === 'paused') {
+          console.log(`当前停在节点: ${result.currentNodeId}`);
+          console.log('执行 flowbraid resume <run-dir> 或 flowbraid send <run-dir> <message> 继续');
+        }
         return result.status === 'failed' ? 1 : 0;
+      } catch (error) {
+        if (error instanceof RunInterruptedError && interruptContext.lastRunDir) {
+          await failRun(interruptContext.lastRunDir, '用户中断运行');
+        }
+        throw error;
+      } finally {
+        interruptContext.dispose();
       }
-
-      const result = await startWorkflow(workflow, {
-        workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
-        defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
-        codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
-        logger: (line) => console.log(line),
-      });
-      console.log(`run ${result.runId} => ${result.status}`);
-      console.log(`workspace: ${result.runDir}`);
-      if (result.status === 'paused') {
-        console.log(`当前停在节点: ${result.currentNodeId}`);
-        console.log('执行 flowbraid resume <run-dir> 继续');
-      }
-      return result.status === 'failed' ? 1 : 0;
     }
 
     if (command === 'resume') {
@@ -189,26 +285,95 @@ async function main(): Promise<number> {
       if (!runDir) {
         throw new Error('resume 需要 run 目录路径');
       }
-      const resolvedRunDir = path.resolve(runDir);
-      const decisionFromFlag = flags.decision === 'approve' || flags.decision === 'reject' ? (flags.decision as 'approve' | 'reject') : undefined;
-      let decision = decisionFromFlag;
-      if (!decision) {
-        const { workspace, manifest } = await loadManifest(resolvedRunDir);
-        const state = await loadRunState(workspace);
-        const currentNode = state.currentNodeId ? manifest.workflow.nodes[state.currentNodeId] : null;
-        if (state.status === 'paused' && currentNode?.type === 'approval') {
-          decision = await promptApprovalDecision(resolvedRunDir);
-        }
-      }
 
-      const result = await resumeWorkflow(resolvedRunDir, {
-        approvalDecision: decision,
-        codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
-        logger: (line) => console.log(line),
-      });
-      console.log(`run ${result.runId} => ${result.status}`);
-      console.log(`workspace: ${result.runDir}`);
-      return result.status === 'failed' ? 1 : 0;
+      const resolvedRunDir = path.resolve(runDir);
+      const decisionFromFlag =
+        flags.decision === 'approve' || flags.decision === 'reject' ? (flags.decision as 'approve' | 'reject') : undefined;
+      const commentFromFlag = flags.message ? String(flags.message) : undefined;
+      const interruptContext = createInterruptContext();
+      interruptContext.lastRunDir = resolvedRunDir;
+
+      try {
+        let decision = decisionFromFlag;
+        let comment = commentFromFlag;
+        if (!decision) {
+          const { workspace, manifest } = await loadManifest(resolvedRunDir);
+          const state = await loadRunState(workspace);
+          const currentNode = state.currentNodeId ? manifest.workflow.nodes[state.currentNodeId] : null;
+          if (currentNode?.type === 'agent_session') {
+            throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
+          }
+          if (state.status === 'paused' && currentNode?.type === 'approval') {
+            const approval = await promptApprovalDecision(resolvedRunDir, interruptContext.controller.signal);
+            decision = approval.decision;
+            comment = approval.comment;
+          }
+        }
+        if (decision === 'reject' && !comment) {
+          throw new Error('approval reject 时必须通过 --message 提供打回意见');
+        }
+
+        const result = await resumeWorkflow(resolvedRunDir, {
+          approvalDecision: decision,
+          approvalComment: comment,
+          codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+          abortSignal: interruptContext.controller.signal,
+          logger: (line) => console.log(line),
+        });
+        console.log(`run ${result.runId} => ${result.status}`);
+        console.log(`workspace: ${result.runDir}`);
+        return result.status === 'failed' ? 1 : 0;
+      } catch (error) {
+        if (error instanceof RunInterruptedError) {
+          await failRun(resolvedRunDir, '用户中断运行');
+        }
+        throw error;
+      } finally {
+        interruptContext.dispose();
+      }
+    }
+
+    if (command === 'send') {
+      const runDir = rest[0];
+      if (!runDir) {
+        throw new Error('send 需要 run 目录路径');
+      }
+      const resolvedRunDir = path.resolve(runDir);
+      const interruptContext = createInterruptContext();
+      interruptContext.lastRunDir = resolvedRunDir;
+
+      try {
+        let message = rest.slice(1).join(' ').trim();
+        if (!message) {
+          if (!process.stdin.isTTY || !process.stdout.isTTY) {
+            throw new Error('send 需要 message 参数');
+          }
+          message = (await promptSendMessage(interruptContext.controller.signal)).trim();
+        }
+        if (!message) {
+          throw new Error('send 的 message 不能为空');
+        }
+
+        const result = await sendWorkflow(resolvedRunDir, message, {
+          codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+          abortSignal: interruptContext.controller.signal,
+          interactiveTerminal: { input: process.stdin, output: process.stdout },
+          logger: (line) => console.log(line),
+        });
+        console.log(`run ${result.runId} => ${result.status}`);
+        console.log(`workspace: ${result.runDir}`);
+        if (result.status === 'paused') {
+          console.log(`当前停在节点: ${result.currentNodeId}`);
+        }
+        return result.status === 'failed' ? 1 : 0;
+      } catch (error) {
+        if (error instanceof RunInterruptedError) {
+          await failRun(resolvedRunDir, '用户中断运行');
+        }
+        throw error;
+      } finally {
+        interruptContext.dispose();
+      }
     }
 
     printUsage();
@@ -223,6 +388,65 @@ async function main(): Promise<number> {
   }
 }
 
+function createInterruptContext(): {
+  controller: AbortController;
+  dispose: () => void;
+  lastRunDir?: string;
+} {
+  const controller = new AbortController();
+  let count = 0;
+  const handleSigint = (): void => {
+    count += 1;
+    if (count === 1) {
+      console.error('收到 Ctrl+C，正在终止当前运行...');
+      controller.abort(new RunInterruptedError());
+      return;
+    }
+    process.exit(130);
+  };
+  process.on('SIGINT', handleSigint);
+  return {
+    controller,
+    dispose: () => process.removeListener('SIGINT', handleSigint),
+  };
+}
+
+function createAbortPromise(abortSignal: AbortSignal | undefined, cleanup?: () => void): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    if (!abortSignal) {
+      return;
+    }
+
+    const handleAbort = (): void => {
+      cleanup?.();
+      reject(new RunInterruptedError());
+    };
+
+    if (abortSignal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    abortSignal.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
+async function failRun(runDir: string, reason: string): Promise<void> {
+  const { workspace } = await loadManifest(runDir);
+  const state = await loadRunState(workspace);
+  if (state.status === 'completed' || state.status === 'failed') {
+    return;
+  }
+  state.status = 'failed';
+  state.failedReason = reason;
+  state.finishedAt = nowIso();
+  await persistRunState(workspace, state);
+  await appendText(
+    path.join(workspace.messagesDir, 'events.jsonl'),
+    `${JSON.stringify({ type: 'run.failed', at: nowIso(), runId: state.runId, reason })}\n`,
+  );
+}
+
 main().then((code) => {
-  process.exitCode = code;
+  process.exit(code);
 });

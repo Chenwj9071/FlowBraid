@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
 import { ensureDir } from '../utils.js';
+import { RunInterruptedError, isAbortSignalTriggered } from '../errors.js';
 
 export interface ShellExecutionOptions {
   command: string;
@@ -10,6 +11,7 @@ export interface ShellExecutionOptions {
   logPath: string;
   env?: NodeJS.ProcessEnv;
   onLine?: (line: string) => void;
+  abortSignal?: AbortSignal;
 }
 
 export interface ShellExecutionResult {
@@ -19,6 +21,9 @@ export interface ShellExecutionResult {
 
 export async function runShellCommand(options: ShellExecutionOptions): Promise<ShellExecutionResult> {
   await ensureDir(path.dirname(options.logPath));
+  if (isAbortSignalTriggered(options.abortSignal)) {
+    throw new RunInterruptedError();
+  }
   const logStream = createWriteStream(options.logPath, { flags: 'a' });
   const child = spawn(options.command, {
     cwd: options.cwd,
@@ -48,14 +53,37 @@ export async function runShellCommand(options: ShellExecutionOptions): Promise<S
     void writeLine(chunk, 'stderr');
   });
 
-  const result = await Promise.race([
-    once(child, 'exit').then(([exitCode, signal]) => ({ exitCode, signal })),
-    once(child, 'error').then(([error]) => {
-      throw error;
-    }),
-  ]);
+  const abortPromise = new Promise<never>((_, reject) => {
+    const signal = options.abortSignal;
+    if (!signal) {
+      return;
+    }
+    const handleAbort = (): void => {
+      try {
+        child.kill();
+      } catch {
+        // ignore kill errors during interrupt
+      }
+      reject(new RunInterruptedError());
+    };
+    signal.addEventListener('abort', handleAbort, { once: true });
+    child.once('exit', () => {
+      signal.removeEventListener('abort', handleAbort);
+    });
+  });
 
-  logStream.end();
-  await once(logStream, 'finish').catch(() => undefined);
-  return result as ShellExecutionResult;
+  try {
+    const result = await Promise.race([
+      once(child, 'exit').then(([exitCode, signal]) => ({ exitCode, signal })),
+      once(child, 'error').then(([error]) => {
+        throw error;
+      }),
+      abortPromise,
+    ]);
+
+    return result as ShellExecutionResult;
+  } finally {
+    logStream.end();
+    await once(logStream, 'finish').catch(() => undefined);
+  }
 }

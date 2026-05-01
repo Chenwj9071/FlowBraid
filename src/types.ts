@@ -1,4 +1,4 @@
-export type NodeKind = 'shell' | 'gate' | 'approval' | 'codex' | 'end';
+export type NodeKind = 'shell' | 'gate' | 'approval' | 'codex' | 'agent_session' | 'end';
 
 export interface WorkflowDefinition {
   id: string;
@@ -36,6 +36,15 @@ export interface CodexNodeDefinition extends WorkflowBaseNode {
   outputFile?: string;
 }
 
+export interface AgentSessionNodeDefinition extends WorkflowBaseNode {
+  type: 'agent_session';
+  provider: 'codex';
+  prompt: string;
+  cwd?: string;
+  model?: string;
+  outputFile?: string;
+}
+
 export interface GateNodeDefinition extends WorkflowBaseNode {
   type: 'gate';
   prompt?: string;
@@ -54,6 +63,7 @@ export interface EndNodeDefinition extends WorkflowBaseNode {
 export type WorkflowNodeDefinition =
   | ShellNodeDefinition
   | CodexNodeDefinition
+  | AgentSessionNodeDefinition
   | GateNodeDefinition
   | ApprovalNodeDefinition
   | EndNodeDefinition;
@@ -117,4 +127,37 @@ export interface RunnerOptions {
   maxSteps?: number;
   codexCommand?: string;
   approvalDecision?: 'approve' | 'reject';
+  approvalComment?: string;
+  interactiveTerminal?: TerminalSession;
+  abortSignal?: AbortSignal;
+}
+
+export interface TerminalSession {
+  input: NodeJS.ReadStream;
+  output: NodeJS.WriteStream;
+}
+
+export type AgentSessionStatus = 'running' | 'waiting_input' | 'completed' | 'failed';
+
+export interface AgentSessionState {
+  nodeId: string;
+  provider: 'codex';
+  status: AgentSessionStatus;
+  turnCount: number;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  lastUserMessage?: string;
+  lastAssistantMessage?: string;
+  outputFile?: string;
+  error?: string;
+}
+
+export interface AgentSessionMessage {
+  kind: 'message' | 'event';
+  role?: 'system' | 'user' | 'assistant';
+  type?: string;
+  content: string;
+  at: string;
+  turn?: number;
 }

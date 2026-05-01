@@ -85,7 +85,14 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
   if (node.id && node.id !== nodeId) {
     throw new WorkflowError(`节点 ${nodeId} 的 id 字段必须与键名一致`);
   }
-  if (node.type !== 'shell' && node.type !== 'gate' && node.type !== 'approval' && node.type !== 'codex' && node.type !== 'end') {
+  if (
+    node.type !== 'shell' &&
+    node.type !== 'gate' &&
+    node.type !== 'approval' &&
+    node.type !== 'codex' &&
+    node.type !== 'agent_session' &&
+    node.type !== 'end'
+  ) {
     throw new WorkflowError(`节点 ${nodeId} 的 type 不合法: ${String((node as { type?: string }).type)}`);
   }
   if (node.type === 'shell' && (typeof node.command !== 'string' || node.command.trim() === '')) {
@@ -94,6 +101,14 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
   if (node.type === 'codex') {
     if ((node.mode !== 'exec' && node.mode !== 'review') || typeof node.prompt !== 'string' || node.prompt.trim() === '') {
       throw new WorkflowError(`codex 节点 ${nodeId} 必须提供 mode(exec|review) 和非空 prompt`);
+    }
+  }
+  if (node.type === 'agent_session') {
+    if (node.provider !== 'codex') {
+      throw new WorkflowError(`agent_session 节点 ${nodeId} 当前仅支持 provider=codex`);
+    }
+    if (typeof node.prompt !== 'string' || node.prompt.trim() === '') {
+      throw new WorkflowError(`agent_session 节点 ${nodeId} 必须提供非空 prompt`);
     }
   }
   if (node.type === 'approval') {

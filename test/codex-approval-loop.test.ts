@@ -199,6 +199,7 @@ nodes:
 
       const rejectResult = await resumeWorkflow(runDir, {
         approvalDecision: 'reject',
+        approvalComment: '请补上 multiply 导出并重新提交验收',
       });
       expect(rejectResult.status).toBe('paused');
       expect(rejectResult.currentNodeId).toBe('approve');

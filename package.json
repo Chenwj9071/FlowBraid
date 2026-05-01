@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "demo:pty": "tsx src/cli.ts run examples/codex-pty-demo.workflow.yaml --interactive",
+    "demo:session": "tsx src/cli.ts run examples/agent-session-demo.workflow.yaml --interactive",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "node-pty": "^1.1.0",
     "yaml": "^2.6.1"
   },
   "devDependencies": {
@@ -19,4 +22,3 @@
     "vitest": "^2.1.9"
   }
 }
-

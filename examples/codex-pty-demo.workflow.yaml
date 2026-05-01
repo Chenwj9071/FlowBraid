@@ -1,0 +1,62 @@
+id: codex-pty-demo
+workdir: ./demo-workdir
+start: develop
+nodes:
+  develop:
+    type: codex
+    mode: exec
+    prompt: |
+      你是开发节点。先阅读 ../demo-dev/AGENTS.md，再执行任务。
+
+      任务目标：
+      1. 在当前工作目录创建 calc.js
+      2. 脚本通过命令行接收两个数字参数 a、b
+      3. 输出 a+b 的结果，只输出结果值
+
+      实现要求：
+      - 使用 Node.js
+      - 脚本运行方式为：node calc.js 1 2
+      - 必须兼容正数、负数和小数
+      - 如存在历史反馈，请先读取 run.dir/messages/human-feedback.jsonl 和验收报告再修复
+
+      完成后输出：
+      - 修改了哪些文件
+      - 如何验证脚本
+    outputFile: develop-last-message.md
+    next: verify
+
+  verify:
+    type: codex
+    mode: review
+    prompt: |
+      你是验收节点。先阅读 ../demo-verify/AGENTS.md，再执行验收。
+
+      验收要求：
+      1. 必须实际执行当前工作目录中的 calc.js
+      2. 至少验证以下用例：
+         - node calc.js 1 2 应输出 3
+         - node calc.js 10 -4 应输出 6
+         - node calc.js 1.5 2.5 应输出 4
+      3. 如果脚本行为不正确，明确写出修复意见并打回开发节点
+
+      输出格式要求：
+      - 必须包含一行 verdict: approve 或 verdict: reject
+      - 如果 reject，必须给出具体失败现象和修复建议
+      - 如果 approve，简要说明通过的验证命令和结果
+    outputFile: verify-report.md
+    transitions:
+      success: approve
+      failure: develop
+
+  approve:
+    type: approval
+    prompt: |
+      请人工确认整个任务是否完成。
+      如果 reject，必须输入具体意见，系统会记录到 human-feedback.jsonl 并按配置打回 develop 节点。
+    transitions:
+      approve: done
+      reject: develop
+
+  done:
+    type: end
+    message: demo completed
