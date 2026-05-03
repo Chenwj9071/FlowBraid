@@ -37,6 +37,11 @@ type RuntimeWorkflow = WorkflowDefinition & WorkflowSourceMeta;
 
 const INTERRUPTED_REASON = '用户中断运行';
 
+interface NodeDirectories {
+  contextDir: string;
+  workdir: string;
+}
+
 export class FlowBraidEngine {
   constructor(
     private readonly workflow: RuntimeWorkflow,
@@ -325,7 +330,8 @@ export class FlowBraidEngine {
     nodeLogPath: string,
     state: RunState,
   ) {
-    const cwd = resolveRelative(this.workflow.directory, node.cwd ?? this.workflow.workdir ?? this.options.defaultWorkdir) ?? this.workflow.directory;
+    const dirs = this.resolveNodeDirectories(node);
+    const cwd = resolveRelative(this.workflow.directory, node.cwd) ?? dirs.contextDir;
     return runShellCommand({
       command: node.command,
       cwd,
@@ -339,6 +345,8 @@ export class FlowBraidEngine {
         FLOWBRAID_NODE_ID: nodeId,
         FLOWBRAID_NODE_DIR: nodeDir,
         FLOWBRAID_NODE_ARTIFACTS_DIR: nodeArtifactsDir,
+        FLOWBRAID_CONTEXT_DIR: dirs.contextDir,
+        FLOWBRAID_WORKDIR: dirs.workdir,
         FLOWBRAID_RESUME_COUNT: String(state.resumeCount),
         FLOWBRAID_STEP_COUNT: String(state.stepCount),
       },
@@ -355,12 +363,14 @@ export class FlowBraidEngine {
     nodeLogPath: string,
     state: RunState,
   ) {
-    const cwd = resolveRelative(this.workflow.directory, node.cwd ?? this.workflow.workdir ?? this.options.defaultWorkdir) ?? this.workflow.directory;
+    const dirs = this.resolveNodeDirectories(node);
+    const cwd = resolveRelative(this.workflow.directory, node.cwd) ?? dirs.contextDir;
     const outputFile = path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md');
-    const prompt = buildCodexPrompt(this.workflow, nodeId, node, nodeDir, nodeArtifactsDir, workspace);
+    const prompt = buildCodexPrompt(this.workflow, nodeId, node, nodeDir, nodeArtifactsDir, workspace, dirs);
     return runCodexTask({
       command: this.options.codexCommand,
       cwd,
+      workdir: dirs.workdir,
       logPath: nodeLogPath,
       outputPath: outputFile,
       prompt,
@@ -375,6 +385,8 @@ export class FlowBraidEngine {
         FLOWBRAID_NODE_ID: nodeId,
         FLOWBRAID_NODE_DIR: nodeDir,
         FLOWBRAID_NODE_ARTIFACTS_DIR: nodeArtifactsDir,
+        FLOWBRAID_CONTEXT_DIR: dirs.contextDir,
+        FLOWBRAID_WORKDIR: dirs.workdir,
         FLOWBRAID_RESUME_COUNT: String(state.resumeCount),
         FLOWBRAID_STEP_COUNT: String(state.stepCount),
         FLOWBRAID_CODEX_MODE: node.mode,
@@ -392,7 +404,8 @@ export class FlowBraidEngine {
     nodeLogPath: string,
     state: RunState,
   ): Promise<{ kind: 'waiting_input' | 'completed' | 'failed'; detail: string }> {
-    const cwd = resolveRelative(this.workflow.directory, node.cwd ?? this.workflow.workdir ?? this.options.defaultWorkdir) ?? this.workflow.directory;
+    const dirs = this.resolveNodeDirectories(node);
+    const cwd = resolveRelative(this.workflow.directory, node.cwd) ?? dirs.contextDir;
     const { inboxPath, outboxPath, sessionStatePath, schemaPath, turnOutputPath } = getAgentSessionPaths(nodeDir);
     let sessionState: AgentSessionState;
     try {
@@ -433,6 +446,7 @@ export class FlowBraidEngine {
     const turnResult = await runCodexSessionTurn({
       command: this.options.codexCommand,
       cwd,
+      workdir: dirs.workdir,
       logPath: nodeLogPath,
       outputPath: turnOutputPath,
       schemaPath,
@@ -447,6 +461,8 @@ export class FlowBraidEngine {
         FLOWBRAID_NODE_ID: nodeId,
         FLOWBRAID_NODE_DIR: nodeDir,
         FLOWBRAID_NODE_ARTIFACTS_DIR: nodeArtifactsDir,
+        FLOWBRAID_CONTEXT_DIR: dirs.contextDir,
+        FLOWBRAID_WORKDIR: dirs.workdir,
         FLOWBRAID_RESUME_COUNT: String(state.resumeCount),
         FLOWBRAID_STEP_COUNT: String(state.stepCount),
         FLOWBRAID_AGENT_PROVIDER: node.provider,
@@ -585,6 +601,16 @@ export class FlowBraidEngine {
       pendingNodeId: state.pendingNodeId,
     };
   }
+
+  private resolveNodeDirectories(
+    node: ShellNodeDefinition | CodexNodeDefinition | AgentSessionNodeDefinition,
+  ): NodeDirectories {
+    const workdir =
+      resolveRelative(this.workflow.directory, node.workdir ?? this.workflow.workdir ?? this.options.defaultWorkdir) ??
+      this.workflow.directory;
+    const contextDir = resolveRelative(this.workflow.directory, node.contextDir ?? this.workflow.contextDir) ?? workdir;
+    return { contextDir, workdir };
+  }
 }
 
 async function readReviewVerdict(filePath: string): Promise<'approve' | 'reject' | null> {
@@ -607,11 +633,12 @@ function buildCodexPrompt(
   nodeDir: string,
   nodeArtifactsDir: string,
   workspace: RunWorkspace,
+  dirs: NodeDirectories,
 ): string {
   const modeText =
     node.mode === 'review'
-      ? 'You are the verification node. You must actually run and inspect the deliverable in the current workdir, then return verdict: approve or verdict: reject exactly as required.'
-      : 'You are the development node. Modify the business files in the current workdir according to the task and deliver a runnable result.';
+      ? 'You are the verification node. Start from context.dir for your role instructions, but actually run and inspect the deliverable inside workdir. Return verdict: approve or verdict: reject exactly as required.'
+      : 'You are the development node. Start from context.dir for your role instructions, but modify the shared business files inside workdir and deliver a runnable result.';
 
   return [
     modeText,
@@ -621,6 +648,14 @@ function buildCodexPrompt(
     `run.dir: ${workspace.runDir}`,
     `node.dir: ${nodeDir}`,
     `artifacts.dir: ${nodeArtifactsDir}`,
+    `context.dir: ${dirs.contextDir}`,
+    `workdir: ${dirs.workdir}`,
+    '',
+    'Directory model:',
+    '- The terminal starts in context.dir.',
+    '- Use context.dir for node identity, local instructions, and role-specific guidance.',
+    '- Use workdir for the real shared business files and command execution target.',
+    '- Different nodes may use different context.dir values while sharing the same workdir.',
     '',
     'Task:',
     node.prompt,

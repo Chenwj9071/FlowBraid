@@ -7,7 +7,9 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 - 通过 CLI 启动工作流。
 - 工作流以图结构描述，支持顺序执行、分支、回流和人工确认点。
 - 每个节点拥有独立运行目录。
-- 实际工程目录通过独立 `workdir` 注入，不能与节点运行目录混用。
+- 每个节点还可以显式声明独立的 `contextDir`，作为该节点终端默认打开的角色目录。
+- 实际工程目录通过独立 `workdir` 注入，不能与节点运行目录或 `contextDir` 混用。
+- 多个节点可以共享同一个 `workdir`，但分别使用不同的 `contextDir` 定义身份、职责和行为准则。
 - 运行状态必须落盘，支持中断后继续执行。
 - 执行过程要可审计，保留日志、状态和消息。
 - 首版监控以终端实时日志和基础状态面板为主，不提前引入复杂 Web 控制台。
@@ -20,6 +22,13 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 - `codex`：调用本地 `Codex CLI` 的任务型节点，支持开发和 code review 两种模式。
 - `agent_session`：长期交互 agent 节点，当前先支持 `provider: codex`，节点完成由结构化会话结果决定。
 - `approval`：人工审批节点，`resume` 时通过 `approve` / `reject` 决定下一跳。
+
+## 节点目录模型
+- `nodeDir`：FlowBraid 为节点分配的运行态目录，用于状态、日志和节点产物。
+- `contextDir`：节点终端默认打开的上下文目录，用于放置该节点的 `AGENTS.md`、角色说明和局部约束。
+- `workdir`：共享业务目录，节点真正修改和验证的业务文件放在这里。
+- 默认情况下，如果未显式声明 `contextDir`，则 `contextDir` 回退为当前节点的 `workdir`。
+- `shell`、`codex` 和 `agent_session` 节点都必须能够同时感知 `contextDir` 与 `workdir`。
 
 ## 节点生命周期
 - `pending`：等待执行。
@@ -39,14 +48,14 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 - `nodes/<node-id>/messages/inbox.jsonl`：会话型节点的 system / user 输入。
 - `nodes/<node-id>/messages/outbox.jsonl`：会话型节点的 assistant 回复和结构化事件。
 - `nodes/<node-id>/state/session.json`：会话型节点的会话状态。
-- 默认情况下，workflow 文件所在目录就是工作目录，运行时 workspace 也落在该目录下。
+- 默认情况下，workflow 文件所在目录就是默认工作目录，运行时 workspace 也落在该目录下。
 
 ## 门禁、回流与会话继续
 - 门禁不是额外脚本，而是运行态的一部分。
 - 运行到 `gate` 节点时，调度器必须暂停并持久化状态。
-- `resume` 后要从门禁后继节点继续执行。
-- 审批节点 `resume` 时必须显式给出决策，审批通过或驳回都属于正常流转。
-- 工作流允许回流，但实现必须避免因配置错误造成无穷循环。
+- `resume` 后要从门禁后续节点继续执行。
+- 审批节点 `resume` 时必须显式给出决策，审批通过或打回都属于正常流转。
+- 工作流允许回流，但实现必须避免因配置错误造成无限循环。
 - 当节点执行失败但声明了 `transitions.failure` 时，调度器应按失败分支继续流转，而不是直接结束整个 run。
 - 会话型节点暂停时，不通过 `resume` 恢复，而是通过 `send` 向当前节点继续发送输入。
 - 人工审批 `reject` 时应支持记录结构化反馈，供后续节点读取和处理。

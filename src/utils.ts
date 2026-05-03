@@ -36,3 +36,7 @@ export function resolveRelative(baseDir: string, value?: string): string | undef
   return path.isAbsolute(value) ? value : path.resolve(baseDir, value);
 }
 
+export function toPosixPath(value: string): string {
+  return value.replace(/\\/gu, '/');
+}
+

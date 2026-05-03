@@ -9,7 +9,7 @@
 
 ## 当前状态
 - 已完成首版工程骨架。
-- 已完成 workflow 解析、状态落盘、shell 执行器、`codex` 任务执行器和 CLI 调度。
+- 已完成 workflow 解析、状态落盘、`shell` 执行器、`codex` 任务执行器和 CLI 调度。
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点。
 - 已支持 `run` 一条命令交互式执行，也支持 `resume` 和 `send`。
 - `codex` 的任务型交互路径已切到 PTY 直通模式。
@@ -17,6 +17,7 @@
 - `Ctrl+C` 已接到统一中断链路，当前 run 会尽量终止子任务并以“用户中断运行”落盘为失败。
 - `codex review` 节点现在会读取 `verdict: approve|reject` 自动走 success / failure 分支。
 - 人工审批 `reject` 会把意见落盘到 `messages/human-feedback.jsonl`。
+- 已支持 workflow 级和节点级的双目录模型：节点可使用独立 `contextDir` 打开角色目录，同时共享独立 `workdir` 协同工作。
 
 ## 已完成里程碑
 1. 冻结需求文档、架构文档和技术选型文档。
@@ -30,6 +31,8 @@
 9. 补齐基础端到端测试、审批回流测试和 PTY smoke test。
 10. 引入 `agent_session` 目录协议、`send` 命令和 `codex` session provider。
 11. 打通 `review verdict -> 自动打回开发` 和 `approval reject -> 记录人工反馈 -> 再开发` 闭环。
+12. 支持节点双目录执行：角色目录定义身份，共享工作目录承载真实业务修改。
+13. 为 Windows PTY 交互链路补上 UTF-8 控制台启动，降低中文角色文档和人工输入乱码问题。
 
 ## 已验证内容
 - `npx tsc -p tsconfig.json --noEmit` 通过。
@@ -39,6 +42,7 @@
 - `codex` 任务节点在交互模式下通过 PTY 直通终端。
 - `agent_session` 已覆盖“等待输入 -> send -> 完成”闭环测试。
 - `codex review` 自动分支和人工反馈回流已覆盖自动化测试。
+- PTY 主示例已覆盖“开发目录 + 验收目录 + 共享 workdir”的双目录执行路径。
 
 ## 当前默认行为
 - workflow 文件所在目录就是默认工作目录。
@@ -46,19 +50,19 @@
 - `gate` / `approval` 使用 `resume` 继续。
 - `agent_session` 使用 `send` 继续，不走 `resume`。
 - 示例运行产物通过 `examples/.gitignore` 忽略。
+- 如果节点未单独声明 `contextDir`，则默认使用当前节点的 `workdir`。
 
 ## 最近一次重点改动
-- 把长期交互 agent 从“进程退出即完成”模型，重构成“结构化 turn 结果驱动流转”的 `agent_session` 模型。
-- 新增 `messages/inbox.jsonl`、`messages/outbox.jsonl` 和 `state/session.json` 作为会话协议。
-- 新增 `flowbraid send <run-dir> <message>`。
-- 增加 `examples/agent-session-demo.workflow.yaml` 和 `npm run demo:session`。
-- 重构 `examples/codex-pty-demo.workflow.yaml` 为“开发 -> 验收因缺注释打回 -> 人工确认 -> 再打回”的完整 PTY 主示例。
+- 给 `shell`、`codex`、`agent_session` 节点补上 `contextDir` / `workdir` 双目录能力。
+- `codex` 和 `agent_session` 现在会从角色目录启动终端，同时在共享业务目录里执行真实工作。
+- 重构 `examples/codex-pty-demo.workflow.yaml`，让开发节点从 `demo-dev` 打开、验收节点从 `demo-verify` 打开，并共同操作 `demo-workdir`。
+- Windows PTY 路径不再直接依赖默认代码页，而是显式切到 UTF-8 控制台后再启动交互式 `codex`。
 
 ## 后续建议
 1. 增加 `flowbraid status`，直接查看当前 run、当前节点和最近一次会话事件。
 2. 为 `agent_session` 增加更明确的 provider 抽象，准备接入第二个 provider。
 3. 完善分支、回流和循环保护的文档与测试矩阵。
-4. 补一条真实 `codex session` 示例，验证人工多轮输入的实际体验。
+4. 继续观察真实 Windows 终端下的 PTY 中文显示，必要时再增加可选的统一英文终端模式。
 
 ## 维护规则
 - 每次做完一轮明确功能，更新这里。

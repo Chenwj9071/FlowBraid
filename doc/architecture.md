@@ -3,7 +3,7 @@
 ## 总体结构
 FlowBraid 当前拆成四层：
 - 工作流定义层：读取、解析、校验 workflow 文件。
-- 调度层：驱动节点执行，处理暂停、审批、回流、resume 和 send。
+- 调度层：驱动节点执行，处理暂停、审批、回流、`resume` 和 `send`。
 - 执行器与 provider 层：负责真正拉起 `shell`、`codex exec`，以及会话型 provider 的单次 turn。
 - 运行时存储层：负责 run workspace、状态文件、消息箱、日志和产物。
 
@@ -13,6 +13,7 @@ FlowBraid 当前拆成四层：
 - 规范化节点定义。
 - 校验起点、节点引用和跳转关系。
 - 当前节点类型包括 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end`。
+- 校验 workflow 级和节点级的 `workdir` / `contextDir` 配置。
 
 ### 2. Run Workspace
 - 每次运行创建独立目录。
@@ -29,10 +30,11 @@ FlowBraid 当前拆成四层：
 
 ### 4. Executors And Providers
 - `shell` 执行器负责一次性本地命令。
-- `codex` 任务节点负责短生命周期的 `codex exec`，完成判定仍然依赖子进程退出码。
+- `codex` 任务节点负责短生命周期的 `codex exec`，完成判定仍然依赖子进程退出码或 review verdict。
 - `codex` 的开发模式在交互运行时通过 PTY 直通当前终端，输入输出都走同一条 terminal 通道。
+- Windows 下的 PTY 交互链路会先切到 UTF-8 控制台，再启动 `codex`，减少中文角色文档和人工输入的乱码问题。
 - `agent_session` 节点不再把“进程退出”当作节点完成信号，而是调用 provider 做一次 turn，消费完整会话历史并返回结构化结果。
-- 当前 provider 只落地 `codex`，但接口边界已经按 `agent_session` 抽开，后续可以接 `claude` 等其他 provider。
+- 当前 provider 只落在 `codex`，但接口边界已经按 `agent_session` 拆开，后续可以接 `claude` 等其他 provider。
 
 ### 5. State And Messaging
 - `state/run.json`：run 级状态。
@@ -44,9 +46,18 @@ FlowBraid 当前拆成四层：
 - `nodes/<node-id>/state/session.json`：会话节点状态，如 `running`、`waiting_input`、`completed`、`failed`。
 - `nodes/<node-id>/artifacts/session-turn-result.json`：最近一次 provider turn 的结构化输出。
 
+## 双目录节点模型
+- `contextDir` 是节点终端默认打开的目录，用于定义身份、角色、行为准则和局部说明。
+- `workdir` 是共享业务目录，用于放置真正协作修改的业务文件。
+- FlowBraid 会把 `contextDir` 作为终端启动目录，并把 `workdir` 通过参数和环境变量显式传给执行器。
+- `codex` / `agent_session` 在启动时同时拿到两类目录：
+  - `-C <contextDir>`：从角色目录打开终端和读取局部约束。
+  - `--cd <workdir>`：在共享业务目录里执行真实修改和验证。
+- 不同节点可以使用不同的 `contextDir`，但指向同一个 `workdir`，从而实现“身份隔离 + 业务协作”。
+
 ## 首版运行流程
 1. 读取 workflow 文件。
-2. 校验 workflow 图结构。
+2. 校验 workflow 图结构和目录配置。
 3. 以 workflow 文件所在目录作为默认工作目录，并在该目录下创建 run workspace。
 4. 从 `start` 节点开始执行。
 5. `shell` 节点运行完成后进入下一跳。
@@ -59,5 +70,6 @@ FlowBraid 当前拆成四层：
 
 ## 当前设计取舍
 - `codex` 任务节点和 `agent_session` 节点并存，而不是强行合并。这是为了避免把短任务语义和长期会话语义混在一个退出协议里。
-- 会话型节点优先走文件协议和结构化结果，不靠解析自然语言输出来猜测“任务是否完成”。
+- 会话型节点优先走文件协议和结构化结果，不靠解析自然语言输出猜测“任务是否完成”。
 - PTY 只用于提升交互体验，不承担节点完成判定职责。
+- 正式示例优先使用英文角色提示和本地 demo 文档，以降低 Windows PTY 下中文输出乱码的概率。

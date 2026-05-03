@@ -47,6 +47,12 @@ export function validateWorkflow(
   if (typeof workflow.start !== 'string' || workflow.start.trim() === '') {
     throw new WorkflowError('workflow.start 必须是非空字符串');
   }
+  if (workflow.workdir !== undefined && (typeof workflow.workdir !== 'string' || workflow.workdir.trim() === '')) {
+    throw new WorkflowError('workflow.workdir 必须是非空字符串');
+  }
+  if (workflow.contextDir !== undefined && (typeof workflow.contextDir !== 'string' || workflow.contextDir.trim() === '')) {
+    throw new WorkflowError('workflow.contextDir 必须是非空字符串');
+  }
   if (!workflow.nodes || typeof workflow.nodes !== 'object') {
     throw new WorkflowError('workflow.nodes 必须是对象');
   }
@@ -95,6 +101,16 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
   ) {
     throw new WorkflowError(`节点 ${nodeId} 的 type 不合法: ${String((node as { type?: string }).type)}`);
   }
+  if ('cwd' in node && node.cwd !== undefined && (typeof node.cwd !== 'string' || node.cwd.trim() === '')) {
+    throw new WorkflowError(`节点 ${nodeId} 的 cwd 必须是非空字符串`);
+  }
+  if ('workdir' in node && node.workdir !== undefined && (typeof node.workdir !== 'string' || node.workdir.trim() === '')) {
+    throw new WorkflowError(`节点 ${nodeId} 的 workdir 必须是非空字符串`);
+  }
+  if ('contextDir' in node && node.contextDir !== undefined && (typeof node.contextDir !== 'string' || node.contextDir.trim() === '')) {
+    throw new WorkflowError(`节点 ${nodeId} 的 contextDir 必须是非空字符串`);
+  }
+
   if (node.type === 'shell' && (typeof node.command !== 'string' || node.command.trim() === '')) {
     throw new WorkflowError(`shell 节点 ${nodeId} 必须提供 command`);
   }

@@ -4,6 +4,7 @@ export interface WorkflowDefinition {
   id: string;
   start: string;
   workdir?: string;
+  contextDir?: string;
   nodes: Record<string, WorkflowNodeDefinition>;
 }
 
@@ -25,6 +26,8 @@ export interface ShellNodeDefinition extends WorkflowBaseNode {
   type: 'shell';
   command: string;
   cwd?: string;
+  workdir?: string;
+  contextDir?: string;
 }
 
 export interface CodexNodeDefinition extends WorkflowBaseNode {
@@ -32,6 +35,8 @@ export interface CodexNodeDefinition extends WorkflowBaseNode {
   mode: 'exec' | 'review';
   prompt: string;
   cwd?: string;
+  workdir?: string;
+  contextDir?: string;
   model?: string;
   outputFile?: string;
 }
@@ -41,6 +46,8 @@ export interface AgentSessionNodeDefinition extends WorkflowBaseNode {
   provider: 'codex';
   prompt: string;
   cwd?: string;
+  workdir?: string;
+  contextDir?: string;
   model?: string;
   outputFile?: string;
 }

@@ -1,9 +1,12 @@
 id: codex-pty-demo
 workdir: ./demo-workdir
+contextDir: ./demo-dev
 start: prepare
 nodes:
   prepare:
     type: shell
+    contextDir: ./demo-workdir
+    workdir: ./demo-workdir
     command: >-
       node -e "const fs = require('node:fs');
       for (const name of fs.readdirSync('.')) {
@@ -17,8 +20,11 @@ nodes:
   develop:
     type: codex
     mode: exec
+    contextDir: ./demo-dev
+    workdir: ./demo-workdir
     prompt: |
-      You are the development node. Read ../demo-dev/AGENTS.md first, then implement the task.
+      You are the development node. Read AGENTS.md in the current directory first, then implement the task.
+      Do the real work inside workdir, not inside the current directory.
 
       Goal:
       1. Create or update calc.js in the current workdir
@@ -56,8 +62,11 @@ nodes:
   verify:
     type: codex
     mode: review
+    contextDir: ./demo-verify
+    workdir: ./demo-workdir
     prompt: |
-      You are the verification node. Read ../demo-verify/AGENTS.md first, then verify the deliverable.
+      You are the verification node. Read AGENTS.md in the current directory first, then verify the deliverable.
+      Run verification commands inside workdir, not inside the current directory.
 
       You must actually run calc.js in the current workdir.
 

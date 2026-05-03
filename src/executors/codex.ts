@@ -12,6 +12,7 @@ import { resetTerminalForPrompt } from '../terminal.js';
 export interface CodexExecutionOptions {
   command?: string;
   cwd: string;
+  workdir?: string;
   logPath: string;
   outputPath: string;
   prompt: string;
@@ -42,9 +43,10 @@ export async function runCodexTask(options: CodexExecutionOptions): Promise<Code
     '--skip-git-repo-check',
     '--output-last-message',
     options.outputPath,
-    '-C',
-    options.cwd,
   ];
+  if (options.workdir) {
+    args.push('--cd', options.workdir);
+  }
   if (options.model) {
     args.push('--model', options.model);
   }
@@ -172,10 +174,9 @@ interface WindowsPtyInternals {
 async function runInteractiveCodexSession(options: InteractiveCodexSessionOptions): Promise<CodexExecutionResult> {
   const cols = options.terminal.output.columns ?? 80;
   const rows = options.terminal.output.rows ?? 24;
-  const resolved = resolveInteractiveCommand(options.command);
-  const ptyArgs = [...resolved.prefixArgs, ...options.args, normalizePromptForShell(options.prompt)];
+  const resolved = buildInteractivePtyCommand(options.command, options.args, options.prompt);
 
-  const ptyProcess: IPty = spawnPty(resolved.command, ptyArgs, {
+  const ptyProcess: IPty = spawnPty(resolved.command, resolved.args, {
     cwd: options.cwd,
     env: options.env,
     name: 'xterm-256color',
@@ -344,18 +345,43 @@ function normalizePromptForShell(prompt: string): string {
   return prompt.replace(/\r?\n+/gu, ' ').trim();
 }
 
-function resolveInteractiveCommand(command: string): { command: string; prefixArgs: string[] } {
+export function buildInteractivePtyCommand(
+  command: string,
+  args: string[],
+  prompt: string,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
   const parts = splitCommandString(command);
   if (parts.length === 0) {
-    return { command, prefixArgs: [] };
+    return { command, args: [...args, normalizePromptForShell(prompt)] };
   }
 
   let [executable, ...prefixArgs] = parts;
-  if (process.platform === 'win32' && !/\.(cmd|exe|bat)$/iu.test(executable) && prefixArgs.length === 0) {
+  if (platform === 'win32' && !/\.(cmd|exe|bat)$/iu.test(executable) && prefixArgs.length === 0) {
     executable = `${executable}.cmd`;
   }
 
-  return { command: executable, prefixArgs };
+  const normalizedPrompt = normalizePromptForShell(prompt);
+  const commandArgs = [...prefixArgs, ...args];
+
+  if (platform !== 'win32') {
+    return {
+      command: executable,
+      args: [...commandArgs, normalizedPrompt],
+    };
+  }
+
+  return {
+    command: 'powershell.exe',
+    args: [
+      '-NoLogo',
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      buildWindowsUtf8PtyCommand(executable, commandArgs, normalizedPrompt),
+    ],
+  };
 }
 
 function splitCommandString(command: string): string[] {
@@ -395,4 +421,24 @@ function splitCommandString(command: string): string[] {
   }
 
   return parts;
+}
+
+function buildWindowsUtf8PtyCommand(executable: string, args: string[], prompt: string): string {
+  const quotedArgs = args.map((arg) => `'${escapePowerShellSingleQuoted(arg)}'`).join(', ');
+  const argvExpression = quotedArgs
+    ? `@(${quotedArgs}, '${escapePowerShellSingleQuoted(prompt)}')`
+    : `@('${escapePowerShellSingleQuoted(prompt)}')`;
+
+  return [
+    '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    '$OutputEncoding = [Console]::OutputEncoding',
+    'try { chcp 65001 > $null } catch {}',
+    `$flowbraidArgs = ${argvExpression}`,
+    `& '${escapePowerShellSingleQuoted(executable)}' @flowbraidArgs`,
+  ].join('; ');
+}
+
+function escapePowerShellSingleQuoted(value: string): string {
+  return value.replace(/'/gu, "''");
 }

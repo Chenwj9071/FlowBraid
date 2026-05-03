@@ -11,6 +11,7 @@ import type { AgentSessionTurnResult } from './types.js';
 export interface CodexSessionTurnOptions {
   command?: string;
   cwd: string;
+  workdir?: string;
   logPath: string;
   outputPath: string;
   schemaPath: string;
@@ -41,9 +42,10 @@ export async function runCodexSessionTurn(options: CodexSessionTurnOptions): Pro
     options.schemaPath,
     '--output-last-message',
     options.outputPath,
-    '-C',
-    options.cwd,
   ];
+  if (options.workdir) {
+    args.push('--cd', options.workdir);
+  }
   if (options.model) {
     args.push('--model', options.model);
   }
@@ -132,16 +134,16 @@ function buildCodexSessionPrompt(messages: AgentSessionMessage[]): string {
     .join('\n');
 
   return [
-    '你正在执行 FlowBraid 的长期交互 agent_session 节点。',
-    '你必须基于下面的完整会话历史继续工作。',
-    '你的最终输出必须严格符合 JSON schema，不要输出 markdown 包裹。',
-    '规则：',
-    '1. 如果还需要用户补充信息、确认或进一步指令，返回 status=waiting_input。',
-    '2. 如果任务已经完成且可以流转到下一个节点，返回 status=completed。',
-    '3. 如果无法继续，返回 status=failed。',
-    '4. message 字段写给用户看，summary 可用于 completed 的简短总结。',
+    'You are executing a FlowBraid long-running agent_session node.',
+    'Continue the task based on the complete conversation history below.',
+    'Your final output must strictly follow the JSON schema. Do not wrap it in markdown.',
+    'Rules:',
+    '1. If you still need more information, confirmation, or instructions from the user, return status=waiting_input.',
+    '2. If the task is complete and the workflow can move to the next node, return status=completed.',
+    '3. If you cannot continue, return status=failed.',
+    '4. message is shown to the user. summary may be used as a short completion summary.',
     '',
-    '会话历史：',
+    'Conversation history:',
     transcript,
   ].join('\n');
 }
@@ -170,4 +172,3 @@ const sessionTurnSchema = {
     },
   },
 } as const;
-

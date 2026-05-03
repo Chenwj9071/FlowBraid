@@ -16,6 +16,24 @@ function countOccurrences(text: string, pattern: string): number {
   return text.split(pattern).length - 1;
 }
 
+function toYamlSingleQuoted(value: string): string {
+  return `'${value.replace(/'/gu, "''").replace(/\\/gu, '/')}'`;
+}
+
+async function copyDir(sourceDir: string, targetDir: string): Promise<void> {
+  await mkdir(targetDir, { recursive: true });
+  const entries = await (await import('node:fs/promises')).readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyDir(sourcePath, targetPath);
+      continue;
+    }
+    await writeFile(targetPath, await readFile(sourcePath));
+  }
+}
+
 async function createFakeCodex(binDir: string): Promise<void> {
   const fakeScript = `
 const fs = require('node:fs');
@@ -23,7 +41,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 function parseArgs(argv) {
-  const result = { outputPath: '', cwd: process.cwd(), prompt: '' };
+  const result = { outputPath: '', cwd: process.cwd(), prompt: '', workdir: process.cwd() };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--output-last-message') {
@@ -31,8 +49,8 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
-    if (arg === '-C') {
-      result.cwd = argv[i + 1] || process.cwd();
+    if (arg === '--cd') {
+      result.workdir = argv[i + 1] || process.cwd();
       i += 1;
       continue;
     }
@@ -56,10 +74,10 @@ if (args[0] !== 'exec') {
 const parsed = parseArgs(args);
 const mode = process.env.FLOWBRAID_CODEX_MODE || 'exec';
 const runDir = process.env.FLOWBRAID_RUN_DIR || process.cwd();
-const calcPath = path.join(parsed.cwd, 'calc.js');
-const feedbackAppliedPath = path.join(parsed.cwd, 'feedback-applied.txt');
-const developLogPath = path.join(parsed.cwd, 'develop-history.log');
-const verifyLogPath = path.join(parsed.cwd, 'verify-history.log');
+const calcPath = path.join(parsed.workdir, 'calc.js');
+const feedbackAppliedPath = path.join(parsed.workdir, 'feedback-applied.txt');
+const developLogPath = path.join(parsed.workdir, 'develop-history.log');
+const verifyLogPath = path.join(parsed.workdir, 'verify-history.log');
 const humanFeedbackPath = path.join(runDir, 'messages', 'human-feedback.jsonl');
 const reviewReportPath = path.join(runDir, 'nodes', 'verify', 'artifacts', 'verify-report.md');
 
@@ -100,6 +118,8 @@ if (mode === 'exec') {
         'updated=calc.js',
         'readVerify=' + hasVerifyReport,
         'readHumanFeedback=' + hasHumanFeedback,
+        'cwd=' + parsed.cwd,
+        'workdir=' + parsed.workdir,
       ].join('\\n'),
       'utf8',
     );
@@ -117,7 +137,7 @@ let allPassed = true;
 const outputs = ['# verify report'];
 for (const [a, b, expected] of cases) {
   const output = cp.execFileSync(process.execPath, [calcPath, a, b], {
-    cwd: parsed.cwd,
+    cwd: parsed.workdir,
     encoding: 'utf8',
   }).trim();
   outputs.push(\`case \${a} \${b} => \${output}\`);
@@ -179,11 +199,11 @@ async function runInteractiveWorkflow(workflowFile: string, env: NodeJS.ProcessE
   child.stdout.on('data', (chunk: Buffer) => {
     const text = chunk.toString('utf8');
     stdout += text;
-    const nextCount = countOccurrences(stdout, '审批结果 [approve/reject]:');
+    const nextCount = countOccurrences(stdout, 'approve/reject');
     while (approvalPromptCount < nextCount) {
       if (approvalPromptCount === 0) {
         child.stdin.write('reject\n');
-        child.stdin.write('请补一条命令行使用说明，并确认注释足够清晰。\n');
+        child.stdin.write('请补充一条命令行使用说明，并确认注释足够清晰。\n');
       } else {
         child.stdin.write('approve\n');
         child.stdin.end();
@@ -216,15 +236,24 @@ describe('codex PTY 交互模式', () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-codex-pty-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const workdir = path.join(workflowDir, 'workdir');
+    const developContextDir = path.join(workflowDir, 'demo-dev');
+    const verifyContextDir = path.join(workflowDir, 'demo-verify');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(workflowDir, { recursive: true });
     await mkdir(workdir, { recursive: true });
     await mkdir(binDir, { recursive: true });
+    await copyDir(path.join(process.cwd(), 'examples', 'demo-dev'), developContextDir);
+    await copyDir(path.join(process.cwd(), 'examples', 'demo-verify'), verifyContextDir);
     await createFakeCodex(binDir);
 
     const exampleWorkflowPath = path.join(process.cwd(), 'examples', 'codex-pty-demo.workflow.yaml');
     const workflowText = await readFile(exampleWorkflowPath, 'utf8');
-    const patchedWorkflow = workflowText.replace('workdir: ./demo-workdir', 'workdir: ./workdir');
+    const patchedWorkflow = workflowText
+      .replace('workdir: ./demo-workdir', 'workdir: ./workdir')
+      .replace(/workdir: \.\/demo-workdir/gu, 'workdir: ./workdir')
+      .replace('contextDir: ./demo-dev', `contextDir: ${toYamlSingleQuoted(developContextDir)}`)
+      .replace('contextDir: ./demo-verify', `contextDir: ${toYamlSingleQuoted(verifyContextDir)}`)
+      .replace('contextDir: ./demo-workdir', 'contextDir: ./workdir');
     const workflowFile = path.join(workflowDir, 'workflow.yaml');
     await writeFile(workflowFile, patchedWorkflow, 'utf8');
 
@@ -236,12 +265,12 @@ describe('codex PTY 交互模式', () => {
 
     const runResult = await runInteractiveWorkflow(workflowFile, env);
     const stdout = stripTerminalSequences(runResult.stdout);
-    expect(runResult.code).toBe(0);
+    expect(runResult.code, `stdout:\n${stdout}\nstderr:\n${runResult.stderr}`).toBe(0);
     expect(runResult.stderr).toBe('');
     expect(stdout).toContain('verdict: reject');
     expect(stdout).toContain('missing the required comment');
     expect(stdout).toContain('verdict: approve');
-    expect(stdout).toContain('审批结果 [approve/reject]:');
+    expect(stdout).toContain('approve/reject');
     expect(stdout).toContain('completed');
 
     const runDirMatch = stdout.match(/workspace:\s*(.+)/);
@@ -264,6 +293,6 @@ describe('codex PTY 交互模式', () => {
     expect(developHistory).toContain('hasHumanFeedback=true');
 
     const feedbackApplied = await readFile(path.join(workdir, 'feedback-applied.txt'), 'utf8');
-    expect(feedbackApplied).toContain('请补一条命令行使用说明，并确认注释足够清晰。');
+    expect(feedbackApplied).toContain('请补充一条命令行使用说明，并确认注释足够清晰。');
   }, 60000);
 });
