@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import { mkdir, readFile } from 'node:fs/promises';
 import { runCodexTask } from './executors/codex.js';
 import { runShellCommand } from './executors/shell.js';
@@ -64,15 +64,15 @@ export class FlowBraidEngine {
     if (!state.pendingNodeId && currentNode?.type !== 'approval') {
       throw new Error('运行状态为 paused，但 pendingNodeId 为空，无法 resume');
     }
-      if (currentNode?.type === 'approval' && !this.options.approvalDecision) {
-        throw new Error('approval 节点需要通过 --decision approve|reject 指定人工确认结果');
-      }
-      if (currentNode?.type === 'approval' && this.options.approvalDecision === 'reject' && !this.options.approvalComment) {
-        throw new Error('approval 节点 reject 时必须提供打回意见');
-      }
-      if (currentNode?.type === 'agent_session') {
-        throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
-      }
+    if (currentNode?.type === 'approval' && !this.options.approvalDecision) {
+      throw new Error('approval 节点需要通过 --decision approve|reject 指定人工确认结果');
+    }
+    if (currentNode?.type === 'approval' && this.options.approvalDecision === 'reject' && !this.options.approvalComment) {
+      throw new Error('approval 节点 reject 时必须提供打回意见');
+    }
+    if (currentNode?.type === 'agent_session') {
+      throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
+    }
 
     state.status = 'running';
     if (currentNode?.type === 'approval') {
@@ -204,20 +204,24 @@ export class FlowBraidEngine {
           if ((exitCode ?? 1) !== 0) {
             outcome = 'failure';
             detail = `codex 退出码 ${exitCode ?? 'null'}`;
+            nextNodeId = null;
           } else if (node.mode === 'review') {
             const verdict = await readReviewVerdict(path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'));
             if (verdict === 'reject') {
               outcome = 'failure';
               detail = 'review verdict=reject';
+              nextNodeId = resolveNodeNext(node, 'failure');
             } else if (verdict === 'approve') {
               detail = 'review verdict=approve';
+              nextNodeId = resolveNodeNext(node, 'success');
             } else {
               detail = 'codex review 完成，但未声明 verdict';
+              nextNodeId = null;
             }
           } else {
             detail = `codex ${node.mode} 完成`;
+            nextNodeId = resolveNodeNext(node, 'success');
           }
-          nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
         } else if (node.type === 'agent_session') {
           const execution = await this.runAgentSessionNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir, nodeLogPath, state);
           detail = execution.detail;
@@ -361,7 +365,7 @@ export class FlowBraidEngine {
       outputPath: outputFile,
       prompt,
       model: node.model,
-      interactiveTerminal: node.mode === 'exec' ? this.options.interactiveTerminal : undefined,
+      interactiveTerminal: this.options.interactiveTerminal,
       abortSignal: this.options.abortSignal,
       env: {
         ...process.env,
@@ -606,8 +610,8 @@ function buildCodexPrompt(
 ): string {
   const modeText =
     node.mode === 'review'
-      ? '你是代码审核节点。请对当前工作区内的修改进行 code review，明确给出 verdict=approve 或 verdict=reject，并说明原因。'
-      : '你是开发节点。请根据任务说明修改当前工作区内的文件，直接输出可运行结果。';
+      ? 'You are the verification node. You must actually run and inspect the deliverable in the current workdir, then return verdict: approve or verdict: reject exactly as required.'
+      : 'You are the development node. Modify the business files in the current workdir according to the task and deliver a runnable result.';
 
   return [
     modeText,
@@ -618,13 +622,19 @@ function buildCodexPrompt(
     `node.dir: ${nodeDir}`,
     `artifacts.dir: ${nodeArtifactsDir}`,
     '',
-    '任务说明：',
+    'Task:',
     node.prompt,
     '',
-    '要求：',
-    '1. 直接在工作目录中修改文件。',
-    '2. 最终消息要可供人工审阅。',
-    '3. 需要时请在输出里说明你修改了哪些文件。',
+    'Shared requirements:',
+    node.mode === 'review'
+      ? '1. You must execute the verification commands and checks from the task. Do not review by reading code only.'
+      : '1. Only modify business files in the current workdir. Do not create extra test scripts, design docs, or unrelated files unless explicitly required.',
+    node.mode === 'review'
+      ? '2. Your conclusion must cover every acceptance criterion in the task, including comments, output format, and human feedback handling requirements.'
+      : '2. Respect the current module system and runtime environment. The delivered script must run directly in this repository configuration.',
+    node.mode === 'review'
+      ? '3. Your final output must contain a standalone line with verdict: approve or verdict: reject, plus the reason.'
+      : '3. Your final output must state which files you changed and how you verified the result.',
   ].join('\n');
 }
 
@@ -669,3 +679,4 @@ export async function sendWorkflow(runDir: string, message: string, options: Run
   const engine = new FlowBraidEngine(workflow, options, workflow.directory);
   return engine.send(runDir, message);
 }
+

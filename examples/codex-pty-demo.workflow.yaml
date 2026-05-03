@@ -1,27 +1,55 @@
 id: codex-pty-demo
 workdir: ./demo-workdir
-start: develop
+start: prepare
 nodes:
+  prepare:
+    type: shell
+    command: >-
+      node -e "const fs = require('node:fs');
+      for (const name of fs.readdirSync('.')) {
+      if (name === 'AGENTS.md' || name === 'doc') continue;
+      if (name === 'calc.js' || name === 'feedback-applied.txt' || name === 'README-demo.txt' || name.endsWith('.log')) {
+      if (fs.existsSync(name)) fs.rmSync(name, { force: true });
+      }
+      }"
+    next: develop
+
   develop:
     type: codex
     mode: exec
     prompt: |
-      你是开发节点。先阅读 ../demo-dev/AGENTS.md，再执行任务。
+      You are the development node. Read ../demo-dev/AGENTS.md first, then implement the task.
 
-      任务目标：
-      1. 在当前工作目录创建 calc.js
-      2. 脚本通过命令行接收两个数字参数 a、b
-      3. 输出 a+b 的结果，只输出结果值
+      Goal:
+      1. Create or update calc.js in the current workdir
+      2. Accept two CLI numeric arguments a and b
+      3. Print only the numeric result of a + b
 
-      实现要求：
-      - 使用 Node.js
-      - 脚本运行方式为：node calc.js 1 2
-      - 必须兼容正数、负数和小数
-      - 如存在历史反馈，请先读取 run.dir/messages/human-feedback.jsonl 和验收报告再修复
+      Environment requirements:
+      - Use Node.js
+      - This repository uses ESM. Do not use require, module.exports, or require.main
+      - The script must run as: node calc.js 1 2
+      - Support positive numbers, negative numbers, and decimals
 
-      完成后输出：
-      - 修改了哪些文件
-      - 如何验证脚本
+      Required behavior:
+      - Before changing code, explicitly read run.dir/nodes/verify/artifacts/verify-report.md when it exists
+      - Before changing code, explicitly read run.dir/messages/human-feedback.jsonl when it exists
+      - If there is no verify report yet, you must submit the smallest correct implementation first
+      - If there is no verify report yet, do not add any comments, usage text, or extra explanation inside calc.js
+      - The first revision is expected to fail verification because comments are intentionally missing
+      - If the latest verify report says comments are missing, your next revision must add comments directly in calc.js without changing the correct behavior
+      - If the latest human feedback asks for extra explanation, address it after the verify requirements are satisfied
+      - Only modify calc.js unless the task explicitly requires something else
+
+      A valid minimal ESM implementation is equivalent to:
+      - read a and b from process.argv
+      - convert them with Number(...)
+      - print Number(a) + Number(b)
+
+      Final response must say:
+      - which files you changed
+      - how you verified the script
+      - whether you read the latest verify report and human feedback before editing
     outputFile: develop-last-message.md
     next: verify
 
@@ -29,20 +57,26 @@ nodes:
     type: codex
     mode: review
     prompt: |
-      你是验收节点。先阅读 ../demo-verify/AGENTS.md，再执行验收。
+      You are the verification node. Read ../demo-verify/AGENTS.md first, then verify the deliverable.
 
-      验收要求：
-      1. 必须实际执行当前工作目录中的 calc.js
-      2. 至少验证以下用例：
-         - node calc.js 1 2 应输出 3
-         - node calc.js 10 -4 应输出 6
-         - node calc.js 1.5 2.5 应输出 4
-      3. 如果脚本行为不正确，明确写出修复意见并打回开发节点
+      You must actually run calc.js in the current workdir.
 
-      输出格式要求：
-      - 必须包含一行 verdict: approve 或 verdict: reject
-      - 如果 reject，必须给出具体失败现象和修复建议
-      - 如果 approve，简要说明通过的验证命令和结果
+      Required checks:
+      1. node calc.js 1 2 must output 3
+      2. node calc.js 10 -4 must output 6
+      3. node calc.js 1.5 2.5 must output 4
+      4. The script must print only the result value
+      5. calc.js must include at least one clear comment explaining the script purpose or the CLI parsing logic
+
+      Decision rules:
+      - If behavior is wrong, verdict must be reject
+      - If behavior is correct but comments are missing, verdict must still be reject
+      - Only approve after both behavior and comment requirements are satisfied
+
+      Output requirements:
+      - Include one standalone line: verdict: approve or verdict: reject
+      - If reject, explain the exact failure and the concrete fix
+      - If approve, summarize the commands you ran, the outputs, and the comment check result
     outputFile: verify-report.md
     transitions:
       success: approve
@@ -51,8 +85,8 @@ nodes:
   approve:
     type: approval
     prompt: |
-      请人工确认整个任务是否完成。
-      如果 reject，必须输入具体意见，系统会记录到 human-feedback.jsonl 并按配置打回 develop 节点。
+      Human confirmation is required before the workflow can end.
+      If you reject, you must provide a concrete comment. The workflow will record it and send the task back to develop.
     transitions:
       approve: done
       reject: develop

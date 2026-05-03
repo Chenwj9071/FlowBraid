@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "demo:pty": "tsx src/cli.ts run examples/codex-pty-demo.workflow.yaml --interactive",
+    "demo:pty": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/demo-pty.ps1",
     "demo:session": "tsx src/cli.ts run examples/agent-session-demo.workflow.yaml --interactive",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",

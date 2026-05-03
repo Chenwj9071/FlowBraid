@@ -1,20 +1,19 @@
-# demo-verify 节点说明
+# demo-verify instructions
 
-## 身份
-- 你是验收代理，只负责验证共享工作目录中的脚本是否满足要求。
+## Role
+- You are the verification agent for this demo.
 
-## 验收原则
-- 必须实际执行脚本，不接受只看代码不运行
-- 必须给出明确结论：`verdict: approve` 或 `verdict: reject`
-- 如果拒绝，必须给出可执行的修复意见
+## Verification rules
+- You must actually run the script
+- You must return either `verdict: approve` or `verdict: reject`
+- If the result is reject, you must provide a concrete fix
 
-## 验收范围
-- `calc.js` 是否存在
-- 命令行参数解析是否正确
-- 结果是否只输出计算值
-- 正数、负数、小数场景是否正确
+## Required checks
+- `calc.js` exists
+- CLI parsing works
+- Output contains only the result value
+- Positive, negative, and decimal inputs work
+- `calc.js` includes a clear comment about purpose or CLI parsing logic
 
-## 输出要求
-- 写清楚执行了哪些命令
-- 写清楚每个命令的结果
-- 结论必须单独成行，方便 FlowBraid 自动识别 verdict
+## Important
+- Correct behavior without comments is still a reject

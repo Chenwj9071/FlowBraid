@@ -7,6 +7,7 @@ import { spawn as spawnPty, type IPty } from 'node-pty';
 import { ensureDir } from '../utils.js';
 import type { TerminalSession } from '../types.js';
 import { RunInterruptedError, isAbortSignalTriggered } from '../errors.js';
+import { resetTerminalForPrompt } from '../terminal.js';
 
 export interface CodexExecutionOptions {
   command?: string;
@@ -141,13 +142,40 @@ interface InteractiveCodexSessionOptions {
   abortSignal?: AbortSignal;
 }
 
+interface DisposableLike {
+  dispose?: () => void;
+}
+
+interface WindowsPtyInternals {
+  _socket?: {
+    destroy?: () => void;
+  };
+  _agent?: {
+    _closeTimeout?: NodeJS.Timeout;
+    _inSocket?: {
+      readable?: boolean;
+      destroy?: () => void;
+    };
+    _outSocket?: {
+      readable?: boolean;
+      destroy?: () => void;
+    };
+    _conoutSocketWorker?: {
+      _worker?: {
+        terminate?: () => Promise<number> | number;
+        unref?: () => void;
+      };
+    } & DisposableLike;
+  };
+}
+
 async function runInteractiveCodexSession(options: InteractiveCodexSessionOptions): Promise<CodexExecutionResult> {
   const cols = options.terminal.output.columns ?? 80;
   const rows = options.terminal.output.rows ?? 24;
-  const ptyCommand = resolveInteractiveCommand(options.command);
-  const ptyArgs = [...options.args, normalizePromptForShell(options.prompt)];
+  const resolved = resolveInteractiveCommand(options.command);
+  const ptyArgs = [...resolved.prefixArgs, ...options.args, normalizePromptForShell(options.prompt)];
 
-  const ptyProcess: IPty = spawnPty(ptyCommand, ptyArgs, {
+  const ptyProcess: IPty = spawnPty(resolved.command, ptyArgs, {
     cwd: options.cwd,
     env: options.env,
     name: 'xterm-256color',
@@ -157,7 +185,9 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
   });
 
   const transcript: string[] = [];
+  let exited = false;
   let terminalOutputBroken = false;
+  let disposed = false;
   const handleTerminalError = (): void => {
     terminalOutputBroken = true;
   };
@@ -210,6 +240,7 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
 
   const exitPromise = new Promise<CodexExecutionResult>((resolve) => {
     ptyProcess.onExit(({ exitCode }) => {
+      exited = true;
       resolve({
         exitCode,
         signal: null,
@@ -217,29 +248,95 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
     });
   });
 
-  ptyProcess.onData((data) => {
+  const dataListener = ptyProcess.onData((data) => {
     writeOutput(data);
   });
+  const exitListener = ptyProcess.onExit(() => {
+    // Keep an explicit subscription to dispose below so Windows ConPTY workers can be fully released.
+  });
 
-  try {
-    const result = await Promise.race([exitPromise, abortPromise]);
-    return result;
-  } finally {
-    if (canResize) {
-      output.removeListener('resize', handleResize);
+  const disposePty = (): void => {
+    if (disposed) {
+      return;
     }
-    options.terminal.output.removeListener('error', handleTerminalError);
-    options.logStream.removeListener('error', handleTerminalError);
-    try {
-      ptyProcess.kill();
-    } catch {
-      // ignore process already exited
-    }
+    disposed = true;
+    forceReleasePtyResources(ptyProcess);
     try {
       (ptyProcess as IPty & { dispose?: () => void }).dispose?.();
     } catch {
       // ignore cleanup errors after exit
     }
+  };
+
+  try {
+    const result = await Promise.race([exitPromise, abortPromise]);
+    return result;
+  } finally {
+    dataListener.dispose();
+    exitListener.dispose();
+    if (canResize) {
+      output.removeListener('resize', handleResize);
+    }
+    options.terminal.output.removeListener('error', handleTerminalError);
+    options.logStream.removeListener('error', handleTerminalError);
+    if (!exited) {
+      try {
+        ptyProcess.kill();
+      } catch {
+        // ignore process already exited
+      }
+    }
+    disposePty();
+    resetTerminalForPrompt(options.terminal);
+  }
+}
+
+function forceReleasePtyResources(ptyProcess: IPty): void {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const internal = ptyProcess as IPty & WindowsPtyInternals;
+  const agent = internal._agent;
+  if (!agent) {
+    return;
+  }
+
+  if (agent._closeTimeout) {
+    clearTimeout(agent._closeTimeout);
+  }
+
+  try {
+    agent._inSocket!.readable = false;
+    agent._inSocket?.destroy?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    agent._outSocket!.readable = false;
+    agent._outSocket?.destroy?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    internal._socket?.destroy?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    agent._conoutSocketWorker?._worker?.unref?.();
+    void agent._conoutSocketWorker?._worker?.terminate?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    agent._conoutSocketWorker?.dispose?.();
+  } catch {
+    // ignore best-effort cleanup failures
   }
 }
 
@@ -247,14 +344,55 @@ function normalizePromptForShell(prompt: string): string {
   return prompt.replace(/\r?\n+/gu, ' ').trim();
 }
 
-function resolveInteractiveCommand(command: string): string {
-  if (process.platform !== 'win32') {
-    return command;
+function resolveInteractiveCommand(command: string): { command: string; prefixArgs: string[] } {
+  const parts = splitCommandString(command);
+  if (parts.length === 0) {
+    return { command, prefixArgs: [] };
   }
 
-  if (/\.(cmd|exe)$/iu.test(command)) {
-    return command;
+  let [executable, ...prefixArgs] = parts;
+  if (process.platform === 'win32' && !/\.(cmd|exe|bat)$/iu.test(executable) && prefixArgs.length === 0) {
+    executable = `${executable}.cmd`;
   }
 
-  return `${command}.cmd`;
+  return { command: executable, prefixArgs };
+}
+
+function splitCommandString(command: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i];
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/u.test(char)) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  return parts;
 }

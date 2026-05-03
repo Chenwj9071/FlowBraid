@@ -6,44 +6,148 @@ import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { readJson } from '../src/utils.js';
 
-function stripAnsi(text: string): string {
-  return text.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
+function stripTerminalSequences(text: string): string {
+  return text
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001B\][^\u0007]*\u0007/g, '');
 }
 
-async function createFakeExecCodex(binDir: string): Promise<void> {
+function countOccurrences(text: string, pattern: string): number {
+  return text.split(pattern).length - 1;
+}
+
+async function createFakeCodex(binDir: string): Promise<void> {
   const fakeScript = `
 const fs = require('node:fs');
 const path = require('node:path');
+const cp = require('node:child_process');
 
-function findCwd(argv) {
+function parseArgs(argv) {
+  const result = { outputPath: '', cwd: process.cwd(), prompt: '' };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === '-C' || arg === '--cd') {
-      return argv[i + 1] || process.cwd();
+    if (arg === '--output-last-message') {
+      result.outputPath = argv[i + 1] || '';
+      i += 1;
+      continue;
+    }
+    if (arg === '-C') {
+      result.cwd = argv[i + 1] || process.cwd();
+      i += 1;
+      continue;
+    }
+    if (!arg.startsWith('-') && arg !== 'exec' && i === argv.length - 1) {
+      result.prompt = arg;
     }
   }
-  return process.cwd();
+  return result;
 }
 
-function findPrompt(argv) {
-  for (let i = argv.length - 1; i >= 0; i -= 1) {
-    const arg = argv[i];
-    if (!arg.startsWith('-') && arg !== 'exec') {
-      return arg;
-    }
-  }
-  return '';
+function append(filePath, text) {
+  fs.appendFileSync(filePath, text + '\\n', 'utf8');
 }
 
 const args = process.argv.slice(2);
-const cwd = findCwd(args);
-const prompt = findPrompt(args);
-const sessionDir = path.join(cwd, 'generated');
-fs.mkdirSync(sessionDir, { recursive: true });
-fs.writeFileSync(path.join(sessionDir, 'interactive-prompt.txt'), prompt, 'utf8');
-process.stdout.write('fake codex exec ready\\n');
-process.stdout.write(\`fake codex prompt: \${prompt}\\n\`);
-setTimeout(() => process.exit(0), 100);
+if (args[0] !== 'exec') {
+  console.error('unsupported subcommand');
+  process.exit(1);
+}
+
+const parsed = parseArgs(args);
+const mode = process.env.FLOWBRAID_CODEX_MODE || 'exec';
+const runDir = process.env.FLOWBRAID_RUN_DIR || process.cwd();
+const calcPath = path.join(parsed.cwd, 'calc.js');
+const feedbackAppliedPath = path.join(parsed.cwd, 'feedback-applied.txt');
+const developLogPath = path.join(parsed.cwd, 'develop-history.log');
+const verifyLogPath = path.join(parsed.cwd, 'verify-history.log');
+const humanFeedbackPath = path.join(runDir, 'messages', 'human-feedback.jsonl');
+const reviewReportPath = path.join(runDir, 'nodes', 'verify', 'artifacts', 'verify-report.md');
+
+if (mode === 'exec') {
+  const reviewReport = fs.existsSync(reviewReportPath) ? fs.readFileSync(reviewReportPath, 'utf8') : '';
+  const humanFeedback = fs.existsSync(humanFeedbackPath) ? fs.readFileSync(humanFeedbackPath, 'utf8') : '';
+  const hasVerifyReport = reviewReport.length > 0;
+  const needsComments = /comment/i.test(reviewReport);
+  const hasHumanFeedback = humanFeedback.length > 0;
+  const lines = hasVerifyReport && (needsComments || hasHumanFeedback)
+    ? [
+        '// Add two CLI numbers and print only the result.',
+        'const a = Number(process.argv[2]);',
+        'const b = Number(process.argv[3]);',
+        '',
+        '// Keep output to the final numeric result only.',
+        'console.log(a + b);',
+        '',
+      ]
+    : [
+        'const a = Number(process.argv[2]);',
+        'const b = Number(process.argv[3]);',
+        'console.log(a + b);',
+        '',
+      ];
+  fs.writeFileSync(calcPath, lines.join('\\n'), 'utf8');
+  append(developLogPath, 'hasVerifyReport=' + hasVerifyReport + ';needsComments=' + needsComments + ';hasHumanFeedback=' + hasHumanFeedback);
+
+  if (hasHumanFeedback) {
+    fs.writeFileSync(feedbackAppliedPath, humanFeedback, 'utf8');
+  }
+
+  if (parsed.outputPath) {
+    fs.writeFileSync(
+      parsed.outputPath,
+      [
+        '# develop report',
+        'updated=calc.js',
+        'readVerify=' + hasVerifyReport,
+        'readHumanFeedback=' + hasHumanFeedback,
+      ].join('\\n'),
+      'utf8',
+    );
+  }
+  console.log('fake develop complete');
+  process.exit(0);
+}
+
+const cases = [
+  ['1', '2', '3'],
+  ['10', '-4', '6'],
+  ['1.5', '2.5', '4'],
+];
+let allPassed = true;
+const outputs = ['# verify report'];
+for (const [a, b, expected] of cases) {
+  const output = cp.execFileSync(process.execPath, [calcPath, a, b], {
+    cwd: parsed.cwd,
+    encoding: 'utf8',
+  }).trim();
+  outputs.push(\`case \${a} \${b} => \${output}\`);
+  if (output !== expected) {
+    allPassed = false;
+  }
+}
+
+const calcContent = fs.readFileSync(calcPath, 'utf8');
+const hasComment = /^\\s*\\/\\/|\\/\\*/m.test(calcContent);
+append(verifyLogPath, 'hasComment=' + hasComment + ';allPassed=' + allPassed);
+
+if (!allPassed) {
+  outputs.push('verdict: reject');
+  outputs.push('Problem: calc.js does not print the correct sum for all required cases.');
+  outputs.push('Fix: print only a + b as the final output value.');
+} else if (!hasComment) {
+  outputs.push('verdict: reject');
+  outputs.push('Problem: calc.js is missing the required comment.');
+  outputs.push('Fix: add a clear comment that explains the script purpose or CLI parsing logic, then resubmit.');
+} else {
+  outputs.push('verdict: approve');
+  outputs.push('Summary: behavior is correct and the required comments are present.');
+}
+
+if (parsed.outputPath) {
+  fs.writeFileSync(parsed.outputPath, outputs.join('\\n'), 'utf8');
+}
+console.log(outputs.join('\\n'));
+process.exit(0);
 `;
 
   const scriptPath = path.join(binDir, 'fake-codex.js');
@@ -55,7 +159,7 @@ setTimeout(() => process.exit(0), 100);
   await chmod(shPath, 0o755);
 }
 
-async function runInteractiveWorkflow(workflowFile: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+async function runInteractiveWorkflow(workflowFile: string, env: NodeJS.ProcessEnv): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const command = process.platform === 'win32' ? 'cmd.exe' : 'npx';
   const cliArgs =
     process.platform === 'win32'
@@ -63,23 +167,28 @@ async function runInteractiveWorkflow(workflowFile: string): Promise<{ code: num
       : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive'];
   const child = spawn(command, cliArgs, {
     cwd: process.cwd(),
-    env: process.env,
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
   });
 
   let stdout = '';
   let stderr = '';
-  let gateContinued = false;
+  let approvalPromptCount = 0;
 
   child.stdout.on('data', (chunk: Buffer) => {
     const text = chunk.toString('utf8');
     stdout += text;
-    if (!gateContinued && text.includes('按回车继续')) {
-      gateContinued = true;
-      setTimeout(() => {
-        child.stdin.write('\n');
-      }, 100);
+    const nextCount = countOccurrences(stdout, '审批结果 [approve/reject]:');
+    while (approvalPromptCount < nextCount) {
+      if (approvalPromptCount === 0) {
+        child.stdin.write('reject\n');
+        child.stdin.write('请补一条命令行使用说明，并确认注释足够清晰。\n');
+      } else {
+        child.stdin.write('approve\n');
+        child.stdin.end();
+      }
+      approvalPromptCount += 1;
     }
   });
   child.stderr.on('data', (chunk: Buffer) => {
@@ -95,7 +204,7 @@ async function runInteractiveWorkflow(workflowFile: string): Promise<{ code: num
       setTimeout(() => {
         child.kill();
         reject(new Error(`interactive workflow timeout\nstdout:\n${stdout}\nstderr:\n${stderr}`));
-      }, 10000);
+      }, 50000);
     }),
   ])) as [number | null, NodeJS.Signals | null];
 
@@ -103,62 +212,58 @@ async function runInteractiveWorkflow(workflowFile: string): Promise<{ code: num
 }
 
 describe('codex PTY 交互模式', () => {
-  it('run --interactive 时 codex exec 结束后会回到主流程继续后续节点', async () => {
+  it('主示例会因缺少注释被验收打回，补注释后再进入人工确认并允许 reject 回流', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-codex-pty-'));
     const workflowDir = path.join(tempRoot, 'workspace');
+    const workdir = path.join(workflowDir, 'workdir');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(workflowDir, { recursive: true });
+    await mkdir(workdir, { recursive: true });
     await mkdir(binDir, { recursive: true });
-    await createFakeExecCodex(binDir);
+    await createFakeCodex(binDir);
+
+    const exampleWorkflowPath = path.join(process.cwd(), 'examples', 'codex-pty-demo.workflow.yaml');
+    const workflowText = await readFile(exampleWorkflowPath, 'utf8');
+    const patchedWorkflow = workflowText.replace('workdir: ./demo-workdir', 'workdir: ./workdir');
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(workflowFile, patchedWorkflow, 'utf8');
 
     const originalPath = process.env.PATH ?? '';
-    process.env.PATH = `${binDir};${originalPath}`;
-    try {
-      const workflowFile = path.join(workflowDir, 'workflow.yaml');
-      const workflow = `
-id: codex-pty-demo
-start: develop
-nodes:
-  develop:
-    type: codex
-    mode: exec
-    prompt: prompt-marker-123 write a tiny test script and exit when done
-    outputFile: develop-session.md
-    next: pause
-  pause:
-    type: gate
-    prompt: codex finished, continue
-    next: done
-  done:
-    type: end
-    message: done
-`;
-      await writeFile(workflowFile, workflow, 'utf8');
+    const env = {
+      ...process.env,
+      PATH: `${binDir}${path.delimiter}${originalPath}`,
+    };
 
-      const runResult = await runInteractiveWorkflow(workflowFile);
-      const stdout = stripAnsi(runResult.stdout);
-      expect(runResult.code).toBe(0);
-      expect(runResult.stderr).toBe('');
-      expect(stdout).toContain('fake codex exec ready');
-      expect(stdout).toContain('fake codex prompt:');
-      expect(stdout).toContain('按回车继续');
-      expect(stdout).toContain('completed');
+    const runResult = await runInteractiveWorkflow(workflowFile, env);
+    const stdout = stripTerminalSequences(runResult.stdout);
+    expect(runResult.code).toBe(0);
+    expect(runResult.stderr).toBe('');
+    expect(stdout).toContain('verdict: reject');
+    expect(stdout).toContain('missing the required comment');
+    expect(stdout).toContain('verdict: approve');
+    expect(stdout).toContain('审批结果 [approve/reject]:');
+    expect(stdout).toContain('completed');
 
-      const runDirMatch = stdout.match(/workspace:\s*(.+)/);
-      expect(runDirMatch).not.toBeNull();
-      const runDir = runDirMatch?.[1]?.trim();
-      expect(runDir).toBeTruthy();
+    const runDirMatch = stdout.match(/workspace:\s*(.+)/);
+    expect(runDirMatch).not.toBeNull();
+    const runDir = runDirMatch?.[1]?.trim();
+    expect(runDir).toBeTruthy();
 
-      const finalState = await readJson<{ status: string; currentNodeId: string | null }>(
-        path.join(runDir!, 'state', 'run.json'),
-      );
-      expect(finalState.status).toBe('completed');
-      expect(finalState.currentNodeId).toBeNull();
+    const finalState = await readJson<{ status: string; currentNodeId: string | null }>(
+      path.join(runDir!, 'state', 'run.json'),
+    );
+    expect(finalState.status).toBe('completed');
+    expect(finalState.currentNodeId).toBeNull();
 
-      const promptText = await readFile(path.join(workflowDir, 'generated', 'interactive-prompt.txt'), 'utf8');
-      expect(promptText).toContain('prompt-marker-123');
-    } finally {
-      process.env.PATH = originalPath;
-    }
-  }, 30000);
+    const calcScript = await readFile(path.join(workdir, 'calc.js'), 'utf8');
+    expect(calcScript).toContain('//');
+
+    const developHistory = await readFile(path.join(workdir, 'develop-history.log'), 'utf8');
+    expect(developHistory).toContain('hasVerifyReport=false;needsComments=false;hasHumanFeedback=false');
+    expect(developHistory).toContain('hasVerifyReport=true;needsComments=true;hasHumanFeedback=false');
+    expect(developHistory).toContain('hasHumanFeedback=true');
+
+    const feedbackApplied = await readFile(path.join(workdir, 'feedback-applied.txt'), 'utf8');
+    expect(feedbackApplied).toContain('请补一条命令行使用说明，并确认注释足够清晰。');
+  }, 60000);
 });

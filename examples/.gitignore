@@ -1,6 +1,7 @@
 .flowbraid-runs/
-demo-workdir/
-prepare.txt
-finish.txt
 *.log
+demo-workdir/calc.js
+demo-workdir/*.log
+demo-workdir/feedback-applied.txt
+demo-workdir/README-demo.txt
 

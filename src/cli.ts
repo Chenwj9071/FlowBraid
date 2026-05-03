@@ -7,6 +7,7 @@ import { loadManifest, loadRunState, persistRunState } from './workspace.js';
 import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
 import { RunInterruptedError } from './errors.js';
 import { appendText, nowIso } from './utils.js';
+import { resetTerminalForPrompt } from './terminal.js';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
@@ -40,10 +41,21 @@ function parseArgs(argv: string[]): { command?: string; rest: string[]; flags: R
   return { command, rest: positional, flags };
 }
 
+function resolveCodexCommand(flags: Record<string, string | boolean>): string | undefined {
+  if (flags['codex-command']) {
+    return String(flags['codex-command']);
+  }
+  if (process.env.FLOWBRAID_CODEX_COMMAND?.trim()) {
+    return process.env.FLOWBRAID_CODEX_COMMAND.trim();
+  }
+  return undefined;
+}
+
 async function promptApprovalDecision(
   runDir: string,
   abortSignal?: AbortSignal,
 ): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
+  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const { workspace, manifest } = await loadManifest(runDir);
   const state = await loadRunState(workspace);
   const currentNodeId = state.currentNodeId;
@@ -88,6 +100,7 @@ async function promptApprovalDecision(
 }
 
 async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
+  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     if (promptText) {
@@ -106,6 +119,7 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
 }
 
 async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<string> {
+  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([
@@ -118,6 +132,7 @@ async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<str
 }
 
 async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
+  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([
@@ -242,11 +257,12 @@ async function main(): Promise<number> {
       const interruptContext = createInterruptContext();
 
       try {
+        const codexCommand = resolveCodexCommand(flags);
         if (shouldInteractive) {
           const result = await runInteractiveWorkflow(workflow, {
             workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
             defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
-            codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+            codexCommand,
             abortSignal: interruptContext.controller.signal,
             onRunDir: (runDir) => {
               interruptContext.lastRunDir = runDir;
@@ -258,7 +274,7 @@ async function main(): Promise<number> {
         const result = await startWorkflow(workflow, {
           workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
           defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
-          codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+          codexCommand,
           abortSignal: interruptContext.controller.signal,
           logger: (line) => console.log(line),
         });
@@ -294,6 +310,7 @@ async function main(): Promise<number> {
       interruptContext.lastRunDir = resolvedRunDir;
 
       try {
+        const codexCommand = resolveCodexCommand(flags);
         let decision = decisionFromFlag;
         let comment = commentFromFlag;
         if (!decision) {
@@ -316,7 +333,7 @@ async function main(): Promise<number> {
         const result = await resumeWorkflow(resolvedRunDir, {
           approvalDecision: decision,
           approvalComment: comment,
-          codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+          codexCommand,
           abortSignal: interruptContext.controller.signal,
           logger: (line) => console.log(line),
         });
@@ -343,6 +360,7 @@ async function main(): Promise<number> {
       interruptContext.lastRunDir = resolvedRunDir;
 
       try {
+        const codexCommand = resolveCodexCommand(flags);
         let message = rest.slice(1).join(' ').trim();
         if (!message) {
           if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -355,7 +373,7 @@ async function main(): Promise<number> {
         }
 
         const result = await sendWorkflow(resolvedRunDir, message, {
-          codexCommand: flags['codex-command'] ? String(flags['codex-command']) : undefined,
+          codexCommand,
           abortSignal: interruptContext.controller.signal,
           interactiveTerminal: { input: process.stdin, output: process.stdout },
           logger: (line) => console.log(line),

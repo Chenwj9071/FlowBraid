@@ -52,7 +52,7 @@
 - 新增 `messages/inbox.jsonl`、`messages/outbox.jsonl` 和 `state/session.json` 作为会话协议。
 - 新增 `flowbraid send <run-dir> <message>`。
 - 增加 `examples/agent-session-demo.workflow.yaml` 和 `npm run demo:session`。
-- 重构 `examples/codex-pty-demo.workflow.yaml` 为“开发 -> 验收 -> 人工确认 -> 打回”的完整脚本示例。
+- 重构 `examples/codex-pty-demo.workflow.yaml` 为“开发 -> 验收因缺注释打回 -> 人工确认 -> 再打回”的完整 PTY 主示例。
 
 ## 后续建议
 1. 增加 `flowbraid status`，直接查看当前 run、当前节点和最近一次会话事件。
