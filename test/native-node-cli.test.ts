@@ -1,0 +1,162 @@
+import path from 'node:path';
+import os from 'node:os';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+import { loadWorkflowFile } from '../src/workflow.js';
+import { createInitialState, createRunWorkspace } from '../src/workspace.js';
+import { main as cliMain } from '../src/cli.js';
+import { getNativeSessionPath, readNativeSessionState } from '../src/native-session.js';
+
+describe('native node CLI protocol', () => {
+  it('records node start', async () => {
+    const { runDir } = await createRunFixture();
+
+    const code = await cliMain([
+      'node',
+      'start',
+      '--run-dir',
+      runDir,
+      '--node-id',
+      'develop',
+      '--terminal-pid',
+      '3001',
+    ]);
+
+    expect(code).toBe(0);
+    const state = await readNativeSessionState(getNativeSessionPath(path.join(runDir, 'nodes', 'develop')));
+    expect(state.status).toBe('running');
+    expect(state.terminalPid).toBe(3001);
+  });
+
+  it('records node complete', async () => {
+    const { runDir } = await createRunFixture();
+
+    const code = await cliMain([
+      'node',
+      'complete',
+      '--run-dir',
+      runDir,
+      '--node-id',
+      'develop',
+      '--summary',
+      'done',
+    ]);
+
+    expect(code).toBe(0);
+    const state = await readNativeSessionState(getNativeSessionPath(path.join(runDir, 'nodes', 'develop')));
+    expect(state.status).toBe('completed');
+    expect(state.result?.kind).toBe('complete');
+    expect(state.result?.summary).toBe('done');
+  });
+
+  it('records node fail', async () => {
+    const { runDir } = await createRunFixture();
+
+    const code = await cliMain([
+      'node',
+      'fail',
+      '--run-dir',
+      runDir,
+      '--node-id',
+      'verify',
+      '--message',
+      'verification failed',
+    ]);
+
+    expect(code).toBe(0);
+    const state = await readNativeSessionState(getNativeSessionPath(path.join(runDir, 'nodes', 'verify')));
+    expect(state.status).toBe('failed');
+    expect(state.result?.kind).toBe('fail');
+    expect(state.result?.message).toBe('verification failed');
+  });
+
+  it('records node artifact events', async () => {
+    const { runDir } = await createRunFixture();
+
+    const code = await cliMain([
+      'node',
+      'artifact',
+      '--run-dir',
+      runDir,
+      '--node-id',
+      'verify',
+      '--file',
+      'artifacts\\verify-report.md',
+    ]);
+
+    expect(code).toBe(0);
+    const events = await readFile(path.join(runDir, 'messages', 'events.jsonl'), 'utf8');
+    expect(events).toContain('"type":"node.native.artifact"');
+    expect(events).toContain('"nodeId":"verify"');
+    expect(events).toContain('artifacts\\\\verify-report.md');
+  });
+
+  it('does not downgrade a completed native session when artifact is reported later', async () => {
+    const { runDir } = await createRunFixture();
+
+    const completeCode = await cliMain([
+      'node',
+      'complete',
+      '--run-dir',
+      runDir,
+      '--node-id',
+      'develop',
+      '--summary',
+      'done',
+    ]);
+    expect(completeCode).toBe(0);
+
+    const artifactCode = await cliMain([
+      'node',
+      'artifact',
+      '--run-dir',
+      runDir,
+      '--node-id',
+      'develop',
+      '--file',
+      'artifacts\\develop-last-message.md',
+    ]);
+    expect(artifactCode).toBe(0);
+
+    const state = await readNativeSessionState(getNativeSessionPath(path.join(runDir, 'nodes', 'develop')));
+    expect(state.status).toBe('completed');
+    expect(state.result?.kind).toBe('complete');
+    expect(state.lastArtifactPath).toBe('artifacts\\develop-last-message.md');
+  });
+});
+
+async function createRunFixture(): Promise<{ runDir: string }> {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-node-cli-'));
+  const workflowDir = path.join(tempRoot, 'workspace');
+  const workspaceRoot = path.join(workflowDir, '.flowbraid-runs');
+  await mkdir(workflowDir, { recursive: true });
+
+  const workflowFile = path.join(workflowDir, 'workflow.yaml');
+  const workflowText = `
+id: native-node-cli-demo
+workdir: .
+start: develop
+nodes:
+  develop:
+    type: codex
+    mode: exec
+    prompt: implement calc
+    next: verify
+  verify:
+    type: codex
+    mode: review
+    prompt: verify calc
+    next: done
+  done:
+    type: end
+    message: done
+`;
+  await writeFile(workflowFile, workflowText, 'utf8');
+
+  const workflow = await loadWorkflowFile(workflowFile);
+  const runWorkspace = await createRunWorkspace(workspaceRoot, workflow);
+  await createInitialState(runWorkspace, workflow);
+  await mkdir(path.join(runWorkspace.nodesDir, 'develop', 'state'), { recursive: true });
+  await mkdir(path.join(runWorkspace.nodesDir, 'verify', 'state'), { recursive: true });
+  return { runDir: runWorkspace.runDir };
+}

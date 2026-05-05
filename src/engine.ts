@@ -1,18 +1,23 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import { mkdir, readFile } from 'node:fs/promises';
-import { runCodexTask } from './executors/codex.js';
+import {
+  runCodexTask,
+  buildInternalCodexNodeInvocation,
+  buildNativeCodexCliInvocation,
+  buildNativeCodexResumeInvocation,
+} from './executors/codex.js';
 import { runShellCommand } from './executors/shell.js';
 import { createInitialState, createRunWorkspace, loadManifest, loadRunState, persistRunState } from './workspace.js';
-import { appendText, ensureDir, nowIso, writeJson, resolveRelative } from './utils.js';
-import {
-  AgentSessionMessage,
+import { appendText, ensureDir, nowIso, resolveRelative, writeJson } from './utils.js';
+import type {
   AgentSessionNodeDefinition,
   AgentSessionState,
   ApprovalNodeDefinition,
   CodexNodeDefinition,
-  EndNodeDefinition,
   ExecutionResult,
+  ExternalSessionState,
   GateNodeDefinition,
+  NativeSessionState,
   NodeState,
   RunState,
   RunWorkspace,
@@ -20,17 +25,24 @@ import {
   ShellNodeDefinition,
   WorkflowDefinition,
   WorkflowSourceMeta,
+  AgentSessionMessage,
+  EndNodeDefinition,
 } from './types.js';
 import { resolveApprovalNext, resolveNodeNext } from './workflow.js';
 import { RunInterruptedError, isAbortSignalTriggered } from './errors.js';
-import {
-  appendAgentSessionMessage,
-  getAgentSessionPaths,
-  readAgentSessionMessages,
-  readAgentSessionState,
-  writeAgentSessionState,
-} from './agent-session.js';
+import { getExternalSessionPath, readExternalSessionState, writeExternalSessionState } from './external-session.js';
+import { appendAgentSessionMessage, getAgentSessionPaths, readAgentSessionMessages, readAgentSessionState, writeAgentSessionState } from './agent-session.js';
 import { runCodexSessionTurn } from './session-providers/codex.js';
+import { createExternalTerminalLauncher } from './terminal-launchers/index.js';
+import { buildCodexPrompt } from './codex-prompt.js';
+import {
+  appendNativeNodeEvent,
+  getNativeSessionPath,
+  readLatestCodexSessionId,
+  readLatestNativeTerminalEvent,
+  readNativeSessionState,
+  writeNativeSessionState,
+} from './native-session.js';
 
 type NodeOutcome = 'success' | 'failure' | 'paused';
 type RuntimeWorkflow = WorkflowDefinition & WorkflowSourceMeta;
@@ -54,6 +66,8 @@ export class FlowBraidEngine {
     await ensureDir(workspaceRoot);
     const workspace = await createRunWorkspace(workspaceRoot, this.workflow);
     const state = await createInitialState(workspace, this.workflow);
+    this.options.logger?.(`[run] started ${workspace.runId}`);
+    this.options.logger?.(`[run] workspace ${workspace.runDir}`);
     return this.runLoop(workspace, state);
   }
 
@@ -88,6 +102,12 @@ export class FlowBraidEngine {
     }
     state.resumeCount += 1;
     await persistRunState(workspace, state);
+    this.options.logger?.(`[run] resume #${state.resumeCount} from ${runDir}`);
+    this.options.logger?.(
+      currentNode?.type === 'approval'
+        ? `[run] approval decision ${this.options.approvalDecision ?? 'unknown'} -> ${state.currentNodeId ?? state.pendingNodeId ?? 'end'}`
+        : `[run] continue at ${state.currentNodeId ?? 'end'}`,
+    );
 
     const resumedWorkflow = manifest.workflow as RuntimeWorkflow;
     const resumedEngine = new FlowBraidEngine(resumedWorkflow, this.options, resumedWorkflow.directory);
@@ -169,6 +189,7 @@ export class FlowBraidEngine {
 
       state.stepCount += 1;
       await persistRunState(workspace, state);
+      this.options.logger?.(`[run] step ${state.stepCount}: enter node ${currentNodeId} (${node.type})`);
 
       const nodeDir = path.join(workspace.nodesDir, currentNodeId);
       const nodeArtifactsDir = path.join(nodeDir, 'artifacts');
@@ -203,29 +224,45 @@ export class FlowBraidEngine {
           }
           nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
         } else if (node.type === 'codex') {
-          const execution = await this.runCodexNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir, nodeLogPath, state);
-          exitCode = execution.exitCode;
-          signal = execution.signal;
-          if ((exitCode ?? 1) !== 0) {
-            outcome = 'failure';
-            detail = `codex 退出码 ${exitCode ?? 'null'}`;
-            nextNodeId = null;
-          } else if (node.mode === 'review') {
-            const verdict = await readReviewVerdict(path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'));
-            if (verdict === 'reject') {
-              outcome = 'failure';
-              detail = 'review verdict=reject';
-              nextNodeId = resolveNodeNext(node, 'failure');
-            } else if (verdict === 'approve') {
-              detail = 'review verdict=approve';
-              nextNodeId = resolveNodeNext(node, 'success');
-            } else {
-              detail = 'codex review 完成，但未声明 verdict';
-              nextNodeId = null;
-            }
+          if (this.options.nativeSplitTerminals) {
+            const execution = await this.runNativeSplitCodexNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir);
+            exitCode = execution.exitCode;
+            signal = execution.signal;
+            outcome = execution.outcome;
+            detail = execution.detail;
+            nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
+          } else if (this.options.splitTerminals && this.options.interactiveTerminal) {
+            const execution = await this.runDetachedCodexNode(node, currentNodeId, workspace, nodeDir);
+            exitCode = execution.exitCode;
+            signal = execution.signal;
+            outcome = execution.outcome;
+            detail = execution.detail;
+            nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
           } else {
-            detail = `codex ${node.mode} 完成`;
-            nextNodeId = resolveNodeNext(node, 'success');
+            const execution = await this.runCodexNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir, nodeLogPath, state);
+            exitCode = execution.exitCode;
+            signal = execution.signal;
+            if ((exitCode ?? 1) !== 0) {
+              outcome = 'failure';
+              detail = `codex 退出码 ${exitCode ?? 'null'}`;
+              nextNodeId = null;
+            } else if (node.mode === 'review') {
+              const verdict = await readReviewVerdict(path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'));
+              if (verdict === 'reject') {
+                outcome = 'failure';
+                detail = 'review verdict=reject';
+                nextNodeId = resolveNodeNext(node, 'failure');
+              } else if (verdict === 'approve') {
+                detail = 'review verdict=approve';
+                nextNodeId = resolveNodeNext(node, 'success');
+              } else {
+                detail = 'codex review 完成，但未声明 verdict';
+                nextNodeId = null;
+              }
+            } else {
+              detail = `codex ${node.mode} 完成`;
+              nextNodeId = resolveNodeNext(node, 'success');
+            }
           }
         } else if (node.type === 'agent_session') {
           const execution = await this.runAgentSessionNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir, nodeLogPath, state);
@@ -289,17 +326,22 @@ export class FlowBraidEngine {
         state.currentNodeId = currentNodeId;
         state.pendingNodeId = nextNodeId;
         await persistRunState(workspace, state);
+        this.options.logger?.(
+          `[run] paused at ${currentNodeId}${nextNodeId ? `, next ${nextNodeId}` : ''}${detail ? `: ${detail}` : ''}`,
+        );
         return this.finalize(workspace, state);
       }
 
       if (outcome === 'failure') {
         if (nextNodeId) {
+          this.options.logger?.(`[run] node ${currentNodeId} failed, route to ${nextNodeId}${detail ? `: ${detail}` : ''}`);
           currentNodeId = nextNodeId;
           state.currentNodeId = currentNodeId;
           state.pendingNodeId = null;
           await persistRunState(workspace, state);
           continue;
         }
+        this.options.logger?.(`[run] failed at ${currentNodeId}${detail ? `: ${detail}` : ''}`);
         state.status = 'failed';
         state.currentNodeId = currentNodeId;
         state.pendingNodeId = nextNodeId;
@@ -308,6 +350,11 @@ export class FlowBraidEngine {
         return this.finalize(workspace, state);
       }
 
+      this.options.logger?.(
+        nextNodeId
+          ? `[run] node ${currentNodeId} succeeded, next ${nextNodeId}${detail ? `: ${detail}` : ''}`
+          : `[run] node ${currentNodeId} succeeded${detail ? `: ${detail}` : ''}`,
+      );
       currentNodeId = nextNodeId;
       state.currentNodeId = currentNodeId;
       state.pendingNodeId = null;
@@ -318,6 +365,7 @@ export class FlowBraidEngine {
     state.currentNodeId = null;
     state.pendingNodeId = null;
     await persistRunState(workspace, state);
+    this.options.logger?.('[run] completed');
     return this.finalize(workspace, state);
   }
 
@@ -393,6 +441,226 @@ export class FlowBraidEngine {
       },
       onLine: (line) => this.options.logger?.(`[${nodeId}] ${line}`),
     });
+  }
+
+  private async runDetachedCodexNode(
+    node: CodexNodeDefinition,
+    nodeId: string,
+    workspace: RunWorkspace,
+    nodeDir: string,
+  ): Promise<{ exitCode: number | null; signal: string | null; outcome: 'success' | 'failure'; detail: string }> {
+    const dirs = this.resolveNodeDirectories(node);
+    const launcher = this.options.externalTerminalLauncher ?? createExternalTerminalLauncher();
+    const invocation = buildInternalCodexNodeInvocation(workspace.runDir, nodeId);
+    const sessionPath = getExternalSessionPath(nodeDir);
+    const resultFile = path.join('artifacts', node.outputFile ?? 'codex-last-message.md');
+    const startedAt = nowIso();
+
+    await writeExternalSessionState(sessionPath, {
+      mode: 'detached_terminal',
+      status: 'launching',
+      startedAt,
+      updatedAt: startedAt,
+      workerPid: process.pid,
+      resultFile,
+    });
+
+    const launched = await launcher.launch({
+      title: `FlowBraid ${nodeId}`,
+      workingDirectory: dirs.contextDir,
+      command: invocation.command,
+      args: invocation.args,
+    });
+
+    await appendText(
+      path.join(workspace.messagesDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'terminal.launched', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
+    );
+
+    let externalState = await this.waitForExternalSession(sessionPath);
+    externalState = {
+      ...externalState,
+      terminalPid: externalState.terminalPid ?? launched.terminalPid,
+      closeRequestedAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    await writeExternalSessionState(sessionPath, externalState);
+    await appendText(
+      path.join(workspace.messagesDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'terminal.close_requested', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
+    );
+
+    await launcher.close(launched.terminalPid);
+
+    externalState = {
+      ...externalState,
+      closeObservedAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    await writeExternalSessionState(sessionPath, externalState);
+    await appendText(
+      path.join(workspace.messagesDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'terminal.closed', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
+    );
+
+    const outcome = externalState.status === 'completed' ? 'success' : 'failure';
+    const detail =
+      node.mode === 'review'
+        ? outcome === 'success'
+          ? 'review verdict=approve'
+          : 'review verdict=reject'
+        : `codex ${node.mode} ${externalState.status}`;
+
+    return {
+      exitCode: externalState.exitCode ?? (outcome === 'success' ? 0 : 1),
+      signal: externalState.signal ?? null,
+      outcome,
+      detail,
+    };
+  }
+
+  private async runNativeSplitCodexNode(
+    node: CodexNodeDefinition,
+    nodeId: string,
+    workspace: RunWorkspace,
+    nodeDir: string,
+    nodeArtifactsDir: string,
+  ): Promise<{ exitCode: number | null; signal: string | null; outcome: 'success' | 'failure' | 'paused'; detail: string }> {
+    const dirs = this.resolveNodeDirectories(node);
+    const launcher = this.options.externalTerminalLauncher ?? createExternalTerminalLauncher();
+    const sessionPath = getNativeSessionPath(nodeDir);
+    const previousSession = await this.readResumableNativeSession(nodeDir);
+    const shouldResume = !!previousSession?.sessionId;
+    const prompt = buildCodexPrompt(this.workflow, nodeId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
+      protocolMode: 'native-split',
+      resumeSession: shouldResume,
+    });
+    const invocation = shouldResume
+      ? buildNativeCodexResumeInvocation({
+          command: this.options.codexCommand,
+          prompt,
+          workdir: dirs.workdir,
+          contextDir: dirs.contextDir,
+          sessionId: previousSession!.sessionId!,
+          model: node.model,
+        })
+      : buildNativeCodexCliInvocation({
+          command: this.options.codexCommand,
+          prompt,
+          workdir: dirs.workdir,
+          contextDir: dirs.contextDir,
+          model: node.model,
+        });
+    const startedAt = nowIso();
+
+    await writeNativeSessionState(sessionPath, {
+      mode: 'native_split_terminal',
+      status: 'launching',
+      startedAt,
+      updatedAt: startedAt,
+    });
+    this.options.logger?.(
+      shouldResume
+        ? `[native] launch ${nodeId} via resume session ${previousSession?.sessionId}`
+        : `[native] launch ${nodeId} via new codex session`,
+    );
+
+    const launched = await launcher.launch({
+      title: `FlowBraid native ${nodeId}`,
+      workingDirectory: dirs.contextDir,
+      command: invocation.command,
+      args: invocation.args,
+      keepOpenOnExit: false,
+    });
+
+    await appendText(
+      path.join(workspace.messagesDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'terminal.launched', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
+    );
+    this.options.logger?.(`[native] ${nodeId} terminal pid ${launched.terminalPid}`);
+
+    const terminalState = await this.waitForNativeSession(sessionPath, workspace.messagesDir, nodeId, launched.terminalPid);
+    const latestSessionId = await readLatestCodexSessionId(dirs.workdir);
+    const finalState: NativeSessionState = {
+      ...terminalState,
+      sessionId: terminalState.sessionId ?? latestSessionId ?? previousSession?.sessionId,
+      terminalPid: terminalState.terminalPid ?? launched.terminalPid,
+      updatedAt: nowIso(),
+    };
+    await writeNativeSessionState(sessionPath, finalState);
+    await appendNativeNodeEvent(workspace.messagesDir, {
+      type: 'terminal.close_requested',
+      nodeId,
+      terminalPid: launched.terminalPid,
+      at: nowIso(),
+    });
+    this.options.logger?.(`[native] ${nodeId} reported ${finalState.status}, waiting briefly for session exit`);
+
+    await delay(750);
+
+    await launcher.close(launched.terminalPid);
+    this.options.logger?.(`[native] ${nodeId} terminal close requested for pid ${launched.terminalPid}`);
+
+    await writeNativeSessionState(sessionPath, {
+      ...finalState,
+      updatedAt: nowIso(),
+    });
+    await appendText(
+      path.join(workspace.messagesDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'terminal.closed', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
+    );
+    this.options.logger?.(`[native] ${nodeId} terminal closed ${launched.terminalPid}`);
+
+    if (finalState.status === 'paused') {
+      return {
+        exitCode: 0,
+        signal: null,
+        outcome: 'paused',
+        detail: finalState.result?.reason ?? 'native codex paused',
+      };
+    }
+
+    if (finalState.status !== 'completed') {
+      return {
+        exitCode: 1,
+        signal: null,
+        outcome: 'failure',
+        detail: finalState.result?.message ?? finalState.result?.reason ?? 'native codex failed',
+      };
+    }
+
+    if (node.mode === 'review') {
+      const verdict = await readReviewVerdict(path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'));
+      if (verdict === 'reject') {
+        return {
+          exitCode: 0,
+          signal: null,
+          outcome: 'failure',
+          detail: 'review verdict=reject',
+        };
+      }
+      if (verdict === 'approve') {
+        return {
+          exitCode: 0,
+          signal: null,
+          outcome: 'success',
+          detail: 'review verdict=approve',
+        };
+      }
+      return {
+        exitCode: 1,
+        signal: null,
+        outcome: 'failure',
+        detail: 'native codex review completed without verdict',
+      };
+    }
+
+    return {
+      exitCode: 0,
+      signal: null,
+      outcome: 'success',
+      detail: shouldResume ? 'codex resumed and completed via native split terminal' : 'codex exec completed via native split terminal',
+    };
   }
 
   private async runAgentSessionNode(
@@ -498,10 +766,7 @@ export class FlowBraidEngine {
         lastAssistantMessage: turnResult.message,
         outputFile: node.outputFile,
       });
-      return {
-        kind: 'waiting_input',
-        detail: turnResult.message,
-      };
+      return { kind: 'waiting_input', detail: turnResult.message };
     }
 
     if (turnResult.status === 'completed') {
@@ -520,10 +785,7 @@ export class FlowBraidEngine {
         outputFile: node.outputFile,
         completedAt: nowIso(),
       });
-      return {
-        kind: 'completed',
-        detail: turnResult.summary ?? turnResult.message,
-      };
+      return { kind: 'completed', detail: turnResult.summary ?? turnResult.message };
     }
 
     await appendAgentSessionMessage(outboxPath, {
@@ -542,10 +804,7 @@ export class FlowBraidEngine {
       completedAt: nowIso(),
       error: turnResult.message,
     });
-    return {
-      kind: 'failed',
-      detail: turnResult.message,
-    };
+    return { kind: 'failed', detail: turnResult.message };
   }
 
   private async finalize(workspace: RunWorkspace, state: RunState): Promise<ExecutionResult> {
@@ -580,14 +839,7 @@ export class FlowBraidEngine {
     comment: string | undefined,
     targetNodeId: string | null,
   ): Promise<void> {
-    const payload = {
-      type: 'approval.decision',
-      nodeId,
-      decision,
-      comment,
-      targetNodeId,
-      at: nowIso(),
-    };
+    const payload = { type: 'approval.decision', nodeId, decision, comment, targetNodeId, at: nowIso() };
     await appendText(path.join(workspace.messagesDir, 'human-feedback.jsonl'), `${JSON.stringify(payload)}\n`);
     await appendText(path.join(workspace.messagesDir, 'events.jsonl'), `${JSON.stringify(payload)}\n`);
   }
@@ -602,14 +854,87 @@ export class FlowBraidEngine {
     };
   }
 
-  private resolveNodeDirectories(
-    node: ShellNodeDefinition | CodexNodeDefinition | AgentSessionNodeDefinition,
-  ): NodeDirectories {
+  private resolveNodeDirectories(node: ShellNodeDefinition | CodexNodeDefinition | AgentSessionNodeDefinition): NodeDirectories {
     const workdir =
       resolveRelative(this.workflow.directory, node.workdir ?? this.workflow.workdir ?? this.options.defaultWorkdir) ??
       this.workflow.directory;
     const contextDir = resolveRelative(this.workflow.directory, node.contextDir ?? this.workflow.contextDir) ?? workdir;
     return { contextDir, workdir };
+  }
+
+  private async waitForExternalSession(sessionPath: string): Promise<ExternalSessionState> {
+    const timeoutAt = Date.now() + 15 * 60_000;
+    while (Date.now() < timeoutAt) {
+      try {
+        const state = await readExternalSessionState(sessionPath);
+        if (state.status === 'completed' || state.status === 'failed') {
+          return state;
+        }
+      } catch {
+        // keep polling
+      }
+      await delay(100);
+    }
+    throw new Error(`等待 external session 超时: ${sessionPath}`);
+  }
+
+  private async waitForNativeSession(
+    sessionPath: string,
+    messagesDir: string,
+    nodeId: string,
+    terminalPid: number,
+  ): Promise<NativeSessionState> {
+    const timeoutAt = Date.now() + 15 * 60_000;
+    while (Date.now() < timeoutAt) {
+      try {
+        const state = await readNativeSessionState(sessionPath);
+        if (state.status === 'completed' || state.status === 'failed' || state.status === 'paused') {
+          return state;
+        }
+      } catch {
+        // keep polling
+      }
+      try {
+        const event = await readLatestNativeTerminalEvent(messagesDir, nodeId);
+        return {
+          mode: 'native_split_terminal',
+          status: event.status,
+          terminalPid,
+          startedAt: nowIso(),
+          updatedAt: nowIso(),
+          completedAt: nowIso(),
+          result: event.result,
+        };
+      } catch {
+        // keep polling
+      }
+      await delay(100);
+    }
+
+    return {
+      mode: 'native_split_terminal',
+      status: 'failed',
+      terminalPid,
+      startedAt: nowIso(),
+      updatedAt: nowIso(),
+      completedAt: nowIso(),
+      result: {
+        kind: 'fail',
+        message: 'native split terminal timed out without reporting final state',
+      },
+    };
+  }
+
+  private async readResumableNativeSession(nodeDir: string): Promise<NativeSessionState | null> {
+    try {
+      const state = await readNativeSessionState(getNativeSessionPath(nodeDir));
+      if ((state.status === 'completed' || state.status === 'failed' || state.status === 'paused') && state.sessionId) {
+        return state;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -624,53 +949,6 @@ async function readReviewVerdict(filePath: string): Promise<'approve' | 'reject'
   } catch {
     return null;
   }
-}
-
-function buildCodexPrompt(
-  workflow: RuntimeWorkflow,
-  nodeId: string,
-  node: CodexNodeDefinition,
-  nodeDir: string,
-  nodeArtifactsDir: string,
-  workspace: RunWorkspace,
-  dirs: NodeDirectories,
-): string {
-  const modeText =
-    node.mode === 'review'
-      ? 'You are the verification node. Start from context.dir for your role instructions, but actually run and inspect the deliverable inside workdir. Return verdict: approve or verdict: reject exactly as required.'
-      : 'You are the development node. Start from context.dir for your role instructions, but modify the shared business files inside workdir and deliver a runnable result.';
-
-  return [
-    modeText,
-    '',
-    `workflow.id: ${workflow.id}`,
-    `node.id: ${nodeId}`,
-    `run.dir: ${workspace.runDir}`,
-    `node.dir: ${nodeDir}`,
-    `artifacts.dir: ${nodeArtifactsDir}`,
-    `context.dir: ${dirs.contextDir}`,
-    `workdir: ${dirs.workdir}`,
-    '',
-    'Directory model:',
-    '- The terminal starts in context.dir.',
-    '- Use context.dir for node identity, local instructions, and role-specific guidance.',
-    '- Use workdir for the real shared business files and command execution target.',
-    '- Different nodes may use different context.dir values while sharing the same workdir.',
-    '',
-    'Task:',
-    node.prompt,
-    '',
-    'Shared requirements:',
-    node.mode === 'review'
-      ? '1. You must execute the verification commands and checks from the task. Do not review by reading code only.'
-      : '1. Only modify business files in the current workdir. Do not create extra test scripts, design docs, or unrelated files unless explicitly required.',
-    node.mode === 'review'
-      ? '2. Your conclusion must cover every acceptance criterion in the task, including comments, output format, and human feedback handling requirements.'
-      : '2. Respect the current module system and runtime environment. The delivered script must run directly in this repository configuration.',
-    node.mode === 'review'
-      ? '3. Your final output must contain a standalone line with verdict: approve or verdict: reject, plus the reason.'
-      : '3. Your final output must state which files you changed and how you verified the result.',
-  ].join('\n');
 }
 
 function buildAgentSessionSystemPrompt(
@@ -690,6 +968,10 @@ function buildAgentSessionSystemPrompt(
     '当任务需要用户进一步输入时，你应返回 waiting_input。',
     '当任务已经完成并可以流转下一个节点时，你应返回 completed。',
   ].join('\n');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function startWorkflow(
@@ -714,4 +996,3 @@ export async function sendWorkflow(runDir: string, message: string, options: Run
   const engine = new FlowBraidEngine(workflow, options, workflow.directory);
   return engine.send(runDir, message);
 }
-

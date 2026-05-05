@@ -20,6 +20,7 @@ export interface CodexExecutionOptions {
   onLine?: (line: string) => void;
   env?: NodeJS.ProcessEnv;
   interactiveTerminal?: TerminalSession;
+  preferNativeInteractive?: boolean;
   abortSignal?: AbortSignal;
 }
 
@@ -37,22 +38,30 @@ export async function runCodexTask(options: CodexExecutionOptions): Promise<Code
 
   const logStream = createWriteStream(options.logPath, { flags: 'a' });
   const codexCommand = options.command ?? 'codex';
-  const args = [
-    'exec',
-    '--full-auto',
-    '--skip-git-repo-check',
-    '--output-last-message',
-    options.outputPath,
-  ];
+  const args = ['exec', '--full-auto', '--skip-git-repo-check', '--output-last-message', options.outputPath];
   if (options.workdir) {
     args.push('--cd', options.workdir);
   }
   if (options.model) {
     args.push('--model', options.model);
   }
+
   if (options.interactiveTerminal) {
     try {
-      const result = await runInteractiveCodexSession({
+      if (options.preferNativeInteractive) {
+        return await runNativeInteractiveCodexSession({
+          command: codexCommand,
+          args,
+          cwd: options.cwd,
+          logStream,
+          prompt: options.prompt,
+          env: options.env,
+          terminal: options.interactiveTerminal,
+          abortSignal: options.abortSignal,
+        });
+      }
+
+      return await runInteractiveCodexSession({
         command: codexCommand,
         args,
         cwd: options.cwd,
@@ -62,7 +71,6 @@ export async function runCodexTask(options: CodexExecutionOptions): Promise<Code
         terminal: options.interactiveTerminal,
         abortSignal: options.abortSignal,
       });
-      return result;
     } finally {
       logStream.end();
       await once(logStream, 'finish').catch(() => undefined);
@@ -185,7 +193,6 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
     useConpty: process.platform === 'win32',
   });
 
-  const transcript: string[] = [];
   let exited = false;
   let terminalOutputBroken = false;
   let disposed = false;
@@ -194,8 +201,8 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
   };
   options.terminal.output.on('error', handleTerminalError);
   options.logStream.on('error', handleTerminalError);
+
   const writeOutput = (data: string): void => {
-    transcript.push(data);
     try {
       options.logStream.write(data);
     } catch {
@@ -209,6 +216,7 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
       }
     }
   };
+
   const output = options.terminal.output;
   const canResize = typeof output.on === 'function' && typeof output.columns === 'number' && typeof output.rows === 'number';
   const handleResize = (): void => {
@@ -270,8 +278,7 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
   };
 
   try {
-    const result = await Promise.race([exitPromise, abortPromise]);
-    return result;
+    return await Promise.race([exitPromise, abortPromise]);
   } finally {
     dataListener.dispose();
     exitListener.dispose();
@@ -292,52 +299,48 @@ async function runInteractiveCodexSession(options: InteractiveCodexSessionOption
   }
 }
 
-function forceReleasePtyResources(ptyProcess: IPty): void {
-  if (process.platform !== 'win32') {
-    return;
-  }
+async function runNativeInteractiveCodexSession(options: InteractiveCodexSessionOptions): Promise<CodexExecutionResult> {
+  const resolved = buildNativeInteractiveCommand(options.command, options.args, options.prompt);
+  const child = spawn(resolved.command, resolved.args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: 'inherit',
+    windowsHide: false,
+  });
 
-  const internal = ptyProcess as IPty & WindowsPtyInternals;
-  const agent = internal._agent;
-  if (!agent) {
-    return;
-  }
+  options.logStream.write(`[native-interactive] ${resolved.command} ${resolved.args.join(' ')}\n`);
 
-  if (agent._closeTimeout) {
-    clearTimeout(agent._closeTimeout);
-  }
-
-  try {
-    agent._inSocket!.readable = false;
-    agent._inSocket?.destroy?.();
-  } catch {
-    // ignore best-effort cleanup failures
-  }
-
-  try {
-    agent._outSocket!.readable = false;
-    agent._outSocket?.destroy?.();
-  } catch {
-    // ignore best-effort cleanup failures
-  }
-
-  try {
-    internal._socket?.destroy?.();
-  } catch {
-    // ignore best-effort cleanup failures
-  }
+  const abortPromise = new Promise<never>((_, reject) => {
+    const signal = options.abortSignal;
+    if (!signal) {
+      return;
+    }
+    const handleAbort = (): void => {
+      try {
+        child.kill();
+      } catch {
+        // ignore kill errors during interrupt
+      }
+      reject(new RunInterruptedError());
+    };
+    signal.addEventListener('abort', handleAbort, { once: true });
+    child.once('exit', () => {
+      signal.removeEventListener('abort', handleAbort);
+    });
+  });
 
   try {
-    agent._conoutSocketWorker?._worker?.unref?.();
-    void agent._conoutSocketWorker?._worker?.terminate?.();
-  } catch {
-    // ignore best-effort cleanup failures
-  }
+    const result = await Promise.race([
+      once(child, 'exit').then(([exitCode, signal]) => ({ exitCode, signal })),
+      once(child, 'error').then(([error]) => {
+        throw error;
+      }),
+      abortPromise,
+    ]);
 
-  try {
-    agent._conoutSocketWorker?.dispose?.();
-  } catch {
-    // ignore best-effort cleanup failures
+    return result as CodexExecutionResult;
+  } finally {
+    resetTerminalForPrompt(options.terminal);
   }
 }
 
@@ -382,6 +385,143 @@ export function buildInteractivePtyCommand(
       buildWindowsUtf8PtyCommand(executable, commandArgs, normalizedPrompt),
     ],
   };
+}
+
+export function buildNativeInteractiveCommand(
+  command: string,
+  args: string[],
+  prompt: string,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  const parts = splitCommandString(command);
+  if (parts.length === 0) {
+    return {
+      command,
+      args: [...args, normalizePromptForShell(prompt)],
+    };
+  }
+
+  let [executable, ...prefixArgs] = parts;
+  if (platform === 'win32' && !/\.(cmd|exe|bat)$/iu.test(executable) && prefixArgs.length === 0) {
+    return {
+      command: 'cmd.exe',
+      args: ['/d', '/c', executable, ...args, normalizePromptForShell(prompt)],
+    };
+  }
+
+  if (platform === 'win32') {
+    if (/\.(cmd|bat)$/iu.test(executable)) {
+      return {
+        command: 'cmd.exe',
+        args: ['/d', '/c', executable, ...prefixArgs, ...args, normalizePromptForShell(prompt)],
+      };
+    }
+    return {
+      command: executable,
+      args: [...prefixArgs, ...args, normalizePromptForShell(prompt)],
+    };
+  }
+
+  return {
+    command: executable,
+    args: [...prefixArgs, ...args, normalizePromptForShell(prompt)],
+  };
+}
+
+export function buildInternalCodexNodeInvocation(
+  runDir: string,
+  nodeId: string,
+  platform: NodeJS.Platform = process.platform,
+  cliArgv: string[] = process.argv,
+): { command: string; args: string[] } {
+  const entryPath = cliArgv[1];
+  if (!entryPath) {
+    throw new Error('Cannot determine FlowBraid CLI entry path for split-terminal mode');
+  }
+
+  const commonArgs = ['internal', 'run-codex-node', '--run-dir', runDir, '--node-id', nodeId];
+  if (entryPath.endsWith('.ts')) {
+    return {
+      command: platform === 'win32' ? 'tsx.cmd' : 'tsx',
+      args: [entryPath, ...commonArgs],
+    };
+  }
+
+  return {
+    command: process.execPath,
+    args: [entryPath, ...commonArgs],
+  };
+}
+
+export function buildFlowBraidNodeCommandPrefix(
+  platform: NodeJS.Platform = process.platform,
+  cliArgv: string[] = process.argv,
+): string {
+  const entryPath = cliArgv[1];
+  if (!entryPath) {
+    throw new Error('Cannot determine FlowBraid CLI entry path for native-split mode');
+  }
+
+  if (entryPath.endsWith('.ts')) {
+    return platform === 'win32' ? `tsx "${entryPath}"` : `tsx "${entryPath}"`;
+  }
+
+  return `"${process.execPath}" "${entryPath}"`;
+}
+
+export function buildNativeCodexCliInvocation(options: {
+  command?: string;
+  prompt: string;
+  workdir: string;
+  contextDir: string;
+  model?: string;
+}): { command: string; args: string[] } {
+  const command = options.command ?? 'codex';
+  const args = [
+    '--cd',
+    options.workdir,
+    '--add-dir',
+    options.contextDir,
+    '--no-alt-screen',
+    '-a',
+    'never',
+    '-s',
+    'danger-full-access',
+  ];
+  if (options.model) {
+    args.push('--model', options.model);
+  }
+  args.push(options.prompt);
+  return { command, args };
+}
+
+export function buildNativeCodexResumeInvocation(options: {
+  command?: string;
+  prompt: string;
+  workdir: string;
+  contextDir: string;
+  sessionId: string;
+  model?: string;
+}): { command: string; args: string[] } {
+  const command = options.command ?? 'codex';
+  const args = [
+    'resume',
+    options.sessionId,
+    '--cd',
+    options.workdir,
+    '--add-dir',
+    options.contextDir,
+    '--no-alt-screen',
+    '-a',
+    'never',
+    '-s',
+    'danger-full-access',
+  ];
+  if (options.model) {
+    args.push('--model', options.model);
+  }
+  args.push(options.prompt);
+  return { command, args };
 }
 
 function splitCommandString(command: string): string[] {
@@ -441,4 +581,53 @@ function buildWindowsUtf8PtyCommand(executable: string, args: string[], prompt: 
 
 function escapePowerShellSingleQuoted(value: string): string {
   return value.replace(/'/gu, "''");
+}
+
+function forceReleasePtyResources(ptyProcess: IPty): void {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const internal = ptyProcess as IPty & WindowsPtyInternals;
+  const agent = internal._agent;
+  if (!agent) {
+    return;
+  }
+
+  if (agent._closeTimeout) {
+    clearTimeout(agent._closeTimeout);
+  }
+
+  try {
+    agent._inSocket!.readable = false;
+    agent._inSocket?.destroy?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    agent._outSocket!.readable = false;
+    agent._outSocket?.destroy?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    internal._socket?.destroy?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    agent._conoutSocketWorker?._worker?.unref?.();
+    void agent._conoutSocketWorker?._worker?.terminate?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
+
+  try {
+    agent._conoutSocketWorker?.dispose?.();
+  } catch {
+    // ignore best-effort cleanup failures
+  }
 }

@@ -136,6 +136,19 @@ export interface RunnerOptions {
   approvalDecision?: 'approve' | 'reject';
   approvalComment?: string;
   interactiveTerminal?: TerminalSession;
+  splitTerminals?: boolean;
+  nativeSplitTerminals?: boolean;
+  externalTerminalLauncher?: {
+    launch(request: {
+      title: string;
+      workingDirectory: string;
+      command: string;
+      args: string[];
+      bootstrapCommand?: string;
+      keepOpenOnExit?: boolean;
+    }): Promise<{ terminalPid: number }>;
+    close(terminalPid: number): Promise<void>;
+  };
   abortSignal?: AbortSignal;
 }
 
@@ -167,4 +180,46 @@ export interface AgentSessionMessage {
   content: string;
   at: string;
   turn?: number;
+}
+
+export type ExternalSessionStatus = 'launching' | 'running' | 'completed' | 'failed' | 'aborting';
+
+export interface ExternalSessionState {
+  mode: 'detached_terminal';
+  status: ExternalSessionStatus;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  terminalPid?: number;
+  workerPid?: number;
+  codexPid?: number;
+  exitCode?: number | null;
+  signal?: string | null;
+  resultFile?: string;
+  closeRequestedAt?: string;
+  closeObservedAt?: string;
+  error?: string;
+}
+
+export type NativeSessionStatus = 'launching' | 'running' | 'completed' | 'failed' | 'paused' | 'aborting';
+
+export interface NativeSessionResult {
+  kind: 'complete' | 'fail' | 'pause';
+  summary?: string;
+  message?: string;
+  reason?: string;
+}
+
+export interface NativeSessionState {
+  mode: 'native_split_terminal';
+  status: NativeSessionStatus;
+  sessionId?: string;
+  terminalPid?: number;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  lastHeartbeatAt?: string;
+  result?: NativeSessionResult;
+  lastArtifactPath?: string;
+  error?: string;
 }

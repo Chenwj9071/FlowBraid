@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { loadWorkflowFile, WorkflowError } from './workflow.js';
 import { loadManifest, loadRunState, persistRunState } from './workspace.js';
@@ -8,37 +9,27 @@ import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
 import { RunInterruptedError } from './errors.js';
 import { appendText, nowIso } from './utils.js';
 import { resetTerminalForPrompt } from './terminal.js';
+import { runInternalCodexNode } from './internal-codex-node.js';
+import { parseArgs } from './cli-args.js';
+import { buildRunnerOptionsFromFlags } from './runtime-options.js';
+import {
+  appendNativeNodeEvent,
+  getNativeSessionPath,
+  readNativeSessionState,
+  updateNativeSessionState,
+  writeNativeSessionState,
+} from './native-session.js';
+import type { NativeSessionResult, NativeSessionState } from './types.js';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
 
-用法:
+Usage:
   flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive]
   flowbraid resume <run-dir> [--decision approve|reject] [--message <text>] [--codex-command <cmd>]
   flowbraid send <run-dir> <message> [--codex-command <cmd>]
+  flowbraid node <start|complete|fail|pause|artifact|heartbeat> --run-dir <dir> --node-id <id> [...]
   flowbraid validate <workflow-file>`);
-}
-
-function parseArgs(argv: string[]): { command?: string; rest: string[]; flags: Record<string, string | boolean> } {
-  const [command, ...rest] = argv;
-  const flags: Record<string, string | boolean> = {};
-  const positional: string[] = [];
-  for (let i = 0; i < rest.length; i += 1) {
-    const item = rest[i];
-    if (item.startsWith('--')) {
-      const key = item.slice(2);
-      const value = rest[i + 1];
-      if (!value || value.startsWith('--')) {
-        flags[key] = true;
-      } else {
-        flags[key] = value;
-        i += 1;
-      }
-    } else {
-      positional.push(item);
-    }
-  }
-  return { command, rest: positional, flags };
 }
 
 function resolveCodexCommand(flags: Record<string, string | boolean>): string | undefined {
@@ -60,12 +51,12 @@ async function promptApprovalDecision(
   const state = await loadRunState(workspace);
   const currentNodeId = state.currentNodeId;
   if (state.status !== 'paused' || !currentNodeId) {
-    throw new Error('当前 run 不是暂停状态，无法发起审批选择');
+    throw new Error('当前 run 不是 paused 状态，无法发起审批');
   }
 
   const currentNode = manifest.workflow.nodes[currentNodeId];
   if (currentNode?.type !== 'approval') {
-    throw new Error('当前暂停节点不是 approval，不能使用交互式审批选择');
+    throw new Error('当前暂停节点不是 approval，不能使用交互式审批');
   }
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -122,10 +113,7 @@ async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<str
   resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    return await Promise.race([
-      rl.question('agent> '),
-      createAbortPromise(abortSignal, () => rl.close()),
-    ]);
+    return await Promise.race([rl.question('agent> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
     rl.close();
   }
@@ -135,10 +123,7 @@ async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
   resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    return await Promise.race([
-      rl.question('message> '),
-      createAbortPromise(abortSignal, () => rl.close()),
-    ]);
+    return await Promise.race([rl.question('message> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
     rl.close();
   }
@@ -150,6 +135,8 @@ async function runInteractiveWorkflow(
     workspaceRoot?: string;
     defaultWorkdir?: string;
     codexCommand?: string;
+    splitTerminals?: boolean;
+    nativeSplitTerminals?: boolean;
     abortSignal?: AbortSignal;
     onRunDir?: (runDir: string) => void;
   },
@@ -158,6 +145,8 @@ async function runInteractiveWorkflow(
     workspaceRoot: options.workspaceRoot,
     defaultWorkdir: options.defaultWorkdir,
     codexCommand: options.codexCommand,
+    splitTerminals: options.splitTerminals,
+    nativeSplitTerminals: options.nativeSplitTerminals,
     abortSignal: options.abortSignal,
     interactiveTerminal: { input: process.stdin, output: process.stdout },
     logger: (line) => console.log(line),
@@ -180,6 +169,8 @@ async function runInteractiveWorkflow(
         approvalDecision: approval.decision,
         approvalComment: approval.comment,
         codexCommand: options.codexCommand,
+        splitTerminals: options.splitTerminals,
+        nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
         logger: (line) => console.log(line),
@@ -192,6 +183,8 @@ async function runInteractiveWorkflow(
       await promptGateContinue(currentNode.prompt ?? '', options.abortSignal);
       result = await resumeWorkflow(result.runDir, {
         codexCommand: options.codexCommand,
+        splitTerminals: options.splitTerminals,
+        nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
         logger: (line) => console.log(line),
@@ -210,6 +203,8 @@ async function runInteractiveWorkflow(
       }
       result = await sendWorkflow(result.runDir, message, {
         codexCommand: options.codexCommand,
+        splitTerminals: options.splitTerminals,
+        nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
         logger: (line) => console.log(line),
@@ -226,8 +221,172 @@ async function runInteractiveWorkflow(
   return result;
 }
 
-async function main(): Promise<number> {
-  const { command, rest, flags } = parseArgs(process.argv.slice(2));
+async function handleNodeCommand(subcommand: string | undefined, flags: Record<string, string | boolean>): Promise<number> {
+  const runDir = flags['run-dir'] ? path.resolve(String(flags['run-dir'])) : undefined;
+  const nodeId = flags['node-id'] ? String(flags['node-id']) : undefined;
+  if (!runDir || !nodeId) {
+    throw new Error('node 命令需要 --run-dir 和 --node-id');
+  }
+
+  const { workspace } = await loadManifest(runDir);
+  const nodeDir = path.join(workspace.nodesDir, nodeId);
+  const sessionPath = getNativeSessionPath(nodeDir);
+  const existingState = await readNativeSessionSafely(sessionPath);
+  const baseState = existingState ?? {
+    mode: 'native_split_terminal',
+    status: 'launching',
+    startedAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  switch (subcommand) {
+    case 'start': {
+      const terminalPid = flags['terminal-pid'] ? Number(String(flags['terminal-pid'])) : undefined;
+      const nextState: NativeSessionState = {
+        ...baseState,
+        mode: 'native_split_terminal',
+        status: 'running',
+        terminalPid,
+        startedAt: baseState.startedAt,
+        updatedAt: nowIso(),
+      };
+      await writeNativeSessionState(sessionPath, nextState);
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'node.native.started',
+        nodeId,
+        at: nowIso(),
+        terminalPid,
+      });
+      return 0;
+    }
+
+    case 'complete': {
+      const summary = flags.summary ? String(flags.summary) : undefined;
+      await updateNativeSessionState(sessionPath, (current) =>
+        buildNativeTerminalState(current ?? baseState, 'completed', {
+          kind: 'complete',
+          summary,
+        }),
+      );
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'node.native.completed',
+        nodeId,
+        at: nowIso(),
+        summary,
+      });
+      return 0;
+    }
+
+    case 'fail': {
+      const message = flags.message ? String(flags.message) : undefined;
+      if (!message) {
+        throw new Error('node fail 需要 --message');
+      }
+      await updateNativeSessionState(sessionPath, (current) =>
+        buildNativeTerminalState(current ?? baseState, 'failed', {
+          kind: 'fail',
+          message,
+        }),
+      );
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'node.native.failed',
+        nodeId,
+        at: nowIso(),
+        message,
+      });
+      return 0;
+    }
+
+    case 'pause': {
+      const reason = flags.reason ? String(flags.reason) : undefined;
+      if (!reason) {
+        throw new Error('node pause 需要 --reason');
+      }
+      await updateNativeSessionState(sessionPath, (current) =>
+        buildNativeTerminalState(current ?? baseState, 'paused', {
+          kind: 'pause',
+          reason,
+        }),
+      );
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'node.native.paused',
+        nodeId,
+        at: nowIso(),
+        reason,
+      });
+      return 0;
+    }
+
+    case 'artifact': {
+      const file = flags.file ? String(flags.file) : undefined;
+      if (!file) {
+        throw new Error('node artifact 需要 --file');
+      }
+      await updateNativeSessionState(sessionPath, (current) => ({
+        ...(current ?? baseState),
+        mode: 'native_split_terminal',
+        updatedAt: nowIso(),
+        lastArtifactPath: file,
+      }));
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'node.native.artifact',
+        nodeId,
+        at: nowIso(),
+        file,
+      });
+      return 0;
+    }
+
+    case 'heartbeat': {
+      await updateNativeSessionState(sessionPath, (current) => {
+        const effectiveState = current ?? baseState;
+        return {
+          ...effectiveState,
+          mode: 'native_split_terminal',
+          status: effectiveState.status === 'launching' ? 'running' : effectiveState.status,
+          updatedAt: nowIso(),
+          lastHeartbeatAt: nowIso(),
+        };
+      });
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'node.native.heartbeat',
+        nodeId,
+        at: nowIso(),
+      });
+      return 0;
+    }
+
+    default:
+      throw new Error(`不支持的 node 子命令: ${String(subcommand)}`);
+  }
+}
+
+function buildNativeTerminalState(
+  baseState: NativeSessionState,
+  status: NativeSessionState['status'],
+  result: NativeSessionResult,
+): NativeSessionState {
+  const completedAt = status === 'completed' || status === 'failed' || status === 'paused' ? nowIso() : undefined;
+  return {
+    ...baseState,
+    mode: 'native_split_terminal',
+    status,
+    updatedAt: nowIso(),
+    completedAt,
+    result,
+  };
+}
+
+async function readNativeSessionSafely(sessionPath: string): Promise<NativeSessionState | null> {
+  try {
+    return await readNativeSessionState(sessionPath);
+  } catch {
+    return null;
+  }
+}
+
+export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  const { command, rest, flags } = parseArgs(argv);
   if (!command) {
     printUsage();
     return 1;
@@ -252,8 +411,7 @@ async function main(): Promise<number> {
 
       const workflow = await loadWorkflowFile(path.resolve(filePath));
       const shouldInteractive =
-        flags.interactive === true ||
-        (flags['no-interactive'] !== true && process.stdin.isTTY && process.stdout.isTTY);
+        flags.interactive === true || (flags['no-interactive'] !== true && process.stdin.isTTY && process.stdout.isTTY);
       const interruptContext = createInterruptContext();
 
       try {
@@ -263,6 +421,8 @@ async function main(): Promise<number> {
             workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
             defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
             codexCommand,
+            splitTerminals: flags['split-terminals'] === true,
+            nativeSplitTerminals: flags['native-split-terminals'] === true,
             abortSignal: interruptContext.controller.signal,
             onRunDir: (runDir) => {
               interruptContext.lastRunDir = runDir;
@@ -272,11 +432,13 @@ async function main(): Promise<number> {
         }
 
         const result = await startWorkflow(workflow, {
-          workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
-          defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
-          codexCommand,
-          abortSignal: interruptContext.controller.signal,
-          logger: (line) => console.log(line),
+          ...buildRunnerOptionsFromFlags(flags, {
+            workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
+            defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
+            codexCommand,
+            abortSignal: interruptContext.controller.signal,
+            logger: (line) => console.log(line),
+          }),
         });
         interruptContext.lastRunDir = result.runDir;
         console.log(`run ${result.runId} => ${result.status}`);
@@ -331,11 +493,13 @@ async function main(): Promise<number> {
         }
 
         const result = await resumeWorkflow(resolvedRunDir, {
-          approvalDecision: decision,
-          approvalComment: comment,
-          codexCommand,
-          abortSignal: interruptContext.controller.signal,
-          logger: (line) => console.log(line),
+          ...buildRunnerOptionsFromFlags(flags, {
+            approvalDecision: decision,
+            approvalComment: comment,
+            codexCommand,
+            abortSignal: interruptContext.controller.signal,
+            logger: (line) => console.log(line),
+          }),
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
@@ -373,10 +537,12 @@ async function main(): Promise<number> {
         }
 
         const result = await sendWorkflow(resolvedRunDir, message, {
-          codexCommand,
-          abortSignal: interruptContext.controller.signal,
-          interactiveTerminal: { input: process.stdin, output: process.stdout },
-          logger: (line) => console.log(line),
+          ...buildRunnerOptionsFromFlags(flags, {
+            codexCommand,
+            abortSignal: interruptContext.controller.signal,
+            interactiveTerminal: { input: process.stdin, output: process.stdout },
+            logger: (line) => console.log(line),
+          }),
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
@@ -391,6 +557,28 @@ async function main(): Promise<number> {
         throw error;
       } finally {
         interruptContext.dispose();
+      }
+    }
+
+    if (command === 'node') {
+      return handleNodeCommand(rest[0], flags);
+    }
+
+    if (command === 'internal') {
+      const subcommand = rest[0];
+      if (subcommand === 'run-codex-node') {
+        const runDir = flags['run-dir'] ? path.resolve(String(flags['run-dir'])) : undefined;
+        const nodeId = flags['node-id'] ? String(flags['node-id']) : undefined;
+        if (!runDir || !nodeId) {
+          throw new Error('internal run-codex-node 需要 --run-dir 和 --node-id');
+        }
+        const codexCommand = resolveCodexCommand(flags);
+        const result = await runInternalCodexNode({
+          runDir,
+          nodeId,
+          codexCommand,
+        });
+        return result.status === 'failed' ? 1 : 0;
       }
     }
 
@@ -465,6 +653,11 @@ async function failRun(runDir: string, reason: string): Promise<void> {
   );
 }
 
-main().then((code) => {
-  process.exit(code);
-});
+const entryScript = process.argv[1];
+const isDirectExecution = !!entryScript && import.meta.url === pathToFileURL(path.resolve(entryScript)).href;
+
+if (isDirectExecution) {
+  main().then((code) => {
+    process.exit(code);
+  });
+}

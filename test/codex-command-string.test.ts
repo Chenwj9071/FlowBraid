@@ -2,10 +2,16 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { buildInteractivePtyCommand, runCodexTask } from '../src/executors/codex.js';
+import {
+  buildInteractivePtyCommand,
+  buildInternalCodexNodeInvocation,
+  buildNativeCodexResumeInvocation,
+  buildNativeInteractiveCommand,
+  runCodexTask,
+} from '../src/executors/codex.js';
 
-describe('codex 字符串命令兼容性', () => {
-  it('支持通过字符串命令启动本地 node 脚本', async () => {
+describe('codex command helpers', () => {
+  it('supports launching a local node script via command string', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-codex-string-'));
     const workdir = path.join(tempRoot, 'workspace');
     await mkdir(workdir, { recursive: true });
@@ -36,11 +42,11 @@ describe('codex 字符串命令兼容性', () => {
     expect(result.exitCode).toBe(0);
   }, 20000);
 
-  it('Windows PTY 交互模式会通过 UTF-8 PowerShell 包装 codex 命令', () => {
+  it('wraps Windows PTY interactive codex through a UTF-8 PowerShell shim', () => {
     const built = buildInteractivePtyCommand(
       'codex',
       ['exec', '--cd', 'D:\\demo-workdir'],
-      '请读取当前目录 AGENTS.md 并在 workdir 中继续工作',
+      'please read AGENTS.md first',
       'win32',
     );
 
@@ -53,6 +59,92 @@ describe('codex 字符串命令兼容性', () => {
     expect(commandText).toContain("'exec'");
     expect(commandText).toContain("'--cd'");
     expect(commandText).toContain("'D:\\demo-workdir'");
-    expect(commandText).toContain('请读取当前目录 AGENTS.md 并在 workdir 中继续工作');
+    expect(commandText).toContain('please read AGENTS.md first');
+  });
+
+  it('builds the split-terminal internal helper invocation for dist cli entry', () => {
+    const built = buildInternalCodexNodeInvocation(
+      'D:\\runs\\demo-123',
+      'develop',
+      'win32',
+      ['node.exe', 'D:\\Project\\FlowBraid\\dist\\cli.js'],
+    );
+
+    expect(built.command).toBe(process.execPath);
+    expect(built.args).toEqual([
+      'D:\\Project\\FlowBraid\\dist\\cli.js',
+      'internal',
+      'run-codex-node',
+      '--run-dir',
+      'D:\\runs\\demo-123',
+      '--node-id',
+      'develop',
+    ]);
+  });
+
+  it('builds the split-terminal internal helper invocation for source cli entry', () => {
+    const built = buildInternalCodexNodeInvocation(
+      '/tmp/run-demo',
+      'verify',
+      'linux',
+      ['node', '/workspace/FlowBraid/src/cli.ts'],
+    );
+
+    expect(built.command).toBe('tsx');
+    expect(built.args).toEqual([
+      '/workspace/FlowBraid/src/cli.ts',
+      'internal',
+      'run-codex-node',
+      '--run-dir',
+      '/tmp/run-demo',
+      '--node-id',
+      'verify',
+    ]);
+  });
+
+  it('builds a native Windows interactive command for split-terminal codex nodes', () => {
+    const built = buildNativeInteractiveCommand(
+      'codex',
+      ['exec', '--cd', 'D:\\demo-workdir'],
+      'please finish the task',
+      'win32',
+    );
+
+    expect(built.command).toBe('cmd.exe');
+    expect(built.args).toEqual(['/d', '/c', 'codex', 'exec', '--cd', 'D:\\demo-workdir', 'please finish the task']);
+  });
+
+  it('wraps direct .cmd commands through cmd.exe for native Windows interactive mode', () => {
+    const built = buildNativeInteractiveCommand(
+      'C:\\tools\\codex.cmd',
+      ['exec', '--cd', 'D:\\demo-workdir'],
+      'please finish the task',
+      'win32',
+    );
+
+    expect(built.command).toBe('cmd.exe');
+    expect(built.args).toEqual([
+      '/d',
+      '/c',
+      'C:\\tools\\codex.cmd',
+      'exec',
+      '--cd',
+      'D:\\demo-workdir',
+      'please finish the task',
+    ]);
+  });
+
+  it('builds native resume invocations with an explicit node session id instead of resume --last', () => {
+    const built = buildNativeCodexResumeInvocation({
+      prompt: 'continue after review feedback',
+      workdir: 'D:\\demo-workdir',
+      contextDir: 'D:\\demo-dev',
+      sessionId: '019df466-f6a4-7ec3-a230-9e6bbd5ebeb9',
+    });
+
+    expect(built.command).toBe('codex');
+    expect(built.args[0]).toBe('resume');
+    expect(built.args[1]).toBe('019df466-f6a4-7ec3-a230-9e6bbd5ebeb9');
+    expect(built.args).not.toContain('--last');
   });
 });

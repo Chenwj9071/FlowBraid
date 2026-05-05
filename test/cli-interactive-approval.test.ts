@@ -8,6 +8,14 @@ import { readJson } from '../src/utils.js';
 
 type RunResult = { code: number | null; stdout: string; stderr: string };
 
+function hasApprovalPrompt(stdout: string): boolean {
+  return stdout.includes('approve/reject');
+}
+
+function hasRejectCommentPrompt(stdout: string): boolean {
+  return stdout.includes('打回意见') || stdout.includes('璇疯緭鍏ユ墦鍥炴剰瑙?') || stdout.includes('鐠囩柉绶崗銉﹀ⅵ閸ョ偞鍓扮憴?');
+}
+
 async function waitForExit(child: ReturnType<typeof spawn>, stdout: () => string, stderr: () => string, timeoutMs = 30000) {
   return (await Promise.race([
     once(child, 'exit'),
@@ -91,7 +99,6 @@ async function runInteractiveReject(workflowFile: string, comment: string): Prom
     if (!sentDecision && stdout.includes('审批结果 [approve/reject]:')) {
       sentDecision = true;
       child.stdin.write('reject\n');
-      return;
     }
     if (sentDecision && !sentComment && stdout.includes('请输入打回意见:')) {
       sentComment = true;
@@ -141,7 +148,6 @@ async function runInteractiveRejectWithPowerShellUtf8(workflowFile: string, comm
     if (!sentDecision && stdout.includes('审批结果 [approve/reject]:')) {
       sentDecision = true;
       child.stdin.write('reject\n', 'utf8');
-      return;
     }
     if (sentDecision && !sentComment && stdout.includes('请输入打回意见:')) {
       sentComment = true;
@@ -184,7 +190,6 @@ async function runViaDemoPtyScript(workflowFile: string, comment: string): Promi
     if (!sentDecision && stdout.includes('审批结果 [approve/reject]:')) {
       sentDecision = true;
       child.stdin.write('reject\n', 'utf8');
-      return;
     }
     if (sentDecision && !sentComment && stdout.includes('请输入打回意见:')) {
       sentComment = true;
@@ -200,6 +205,68 @@ async function runViaDemoPtyScript(workflowFile: string, comment: string): Promi
   return { code, stdout, stderr };
 }
 
+async function runViaDemoSplitScript(workflowFile: string, comment: string): Promise<RunResult> {
+  if (process.platform !== 'win32') {
+    return runInteractiveReject(workflowFile, comment);
+  }
+
+  const child = spawn(
+    'powershell.exe',
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      `[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); chcp 65001 > $null; powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'scripts/demo-split.ps1' '${workflowFile.replace(/'/g, "''")}'`,
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+    },
+  );
+
+  let stdout = '';
+  let stderr = '';
+  let sentDecision = false;
+  let sentComment = false;
+  let commentTimer: NodeJS.Timeout | undefined;
+
+  child.stdout.on('data', (chunk: Buffer) => {
+    const text = chunk.toString('utf8');
+    stdout += text;
+    if (!sentDecision && hasApprovalPrompt(stdout)) {
+      sentDecision = true;
+      child.stdin.write('reject\n', 'utf8');
+      commentTimer = setTimeout(() => {
+        if (!sentComment) {
+          sentComment = true;
+          child.stdin.write(`${comment}\n`, 'utf8');
+          child.stdin.end();
+        }
+      }, 300);
+    }
+    if (sentDecision && !sentComment && hasRejectCommentPrompt(stdout)) {
+      sentComment = true;
+      if (commentTimer) {
+        clearTimeout(commentTimer);
+      }
+      child.stdin.write(`${comment}\n`, 'utf8');
+      child.stdin.end();
+    }
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8');
+  });
+
+  const [code] = await waitForExit(child, () => stdout, () => stderr, 120000);
+  if (commentTimer) {
+    clearTimeout(commentTimer);
+  }
+  return { code, stdout, stderr };
+}
 describe('CLI 交互式审批', () => {
   it('run 时可以在同一个终端选择 approve 并继续结束', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-cli-approval-'));
@@ -369,4 +436,44 @@ nodes:
     expect(feedback).toContain('"decision":"reject"');
     expect(feedback).toContain(reviewComment);
   }, 30000);
+
+  it('Windows split demo 入口也支持中文 reject 意见写入 human-feedback.jsonl', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-demo-split-reject-cn-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    const workflow = `
+id: interactive-demo-split-reject-cn-demo
+start: approve
+nodes:
+  approve:
+    type: approval
+    prompt: 璇风‘璁ゆ槸鍚﹂€氳繃
+    transitions:
+      approve: done
+      reject: done
+  done:
+    type: end
+    message: 瀹屾垚
+`;
+    await writeFile(workflowFile, workflow, 'utf8');
+
+    const reviewComment = '璇疯ˉ鍏呬竴鏉″懡浠よ浣跨敤璇存槑锛屽苟纭娉ㄩ噴瓒冲娓呮櫚銆?';
+    const result = await runViaDemoSplitScript(workflowFile, reviewComment);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('approve/reject');
+    expect(hasRejectCommentPrompt(result.stdout)).toBe(true);
+    expect(result.stdout).toContain('completed');
+    expect(result.stderr).toBe('');
+
+    const runDirMatch = result.stdout.match(/workspace:\s*(.+)/);
+    expect(runDirMatch).not.toBeNull();
+    const runDir = runDirMatch?.[1]?.trim();
+    expect(runDir).toBeTruthy();
+
+    const feedback = await readFile(path.join(runDir!, 'messages', 'human-feedback.jsonl'), 'utf8');
+    expect(feedback).toContain('"decision":"reject"');
+    expect(feedback).toContain(reviewComment);
+  }, 120000);
 });
