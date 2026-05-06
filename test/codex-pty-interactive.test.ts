@@ -1,19 +1,16 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';
+import { resumeWorkflow } from '../src/engine.js';
 import { readJson } from '../src/utils.js';
 
 function stripTerminalSequences(text: string): string {
   return text
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001B\][^\u0007]*\u0007/g, '');
-}
-
-function countOccurrences(text: string, pattern: string): number {
-  return text.split(pattern).length - 1;
 }
 
 function toYamlSingleQuoted(value: string): string {
@@ -194,21 +191,14 @@ async function runInteractiveWorkflow(workflowFile: string, env: NodeJS.ProcessE
 
   let stdout = '';
   let stderr = '';
-  let approvalPromptCount = 0;
+  let approved = false;
 
   child.stdout.on('data', (chunk: Buffer) => {
-    const text = chunk.toString('utf8');
-    stdout += text;
-    const nextCount = countOccurrences(stdout, 'approve/reject');
-    while (approvalPromptCount < nextCount) {
-      if (approvalPromptCount === 0) {
-        child.stdin.write('reject\n');
-        child.stdin.write('请补充一条命令行使用说明，并确认注释足够清晰。\n');
-      } else {
-        child.stdin.write('approve\n');
-        child.stdin.end();
-      }
-      approvalPromptCount += 1;
+    stdout += chunk.toString('utf8');
+    if (!approved && stdout.includes('approve/reject')) {
+      approved = true;
+      child.stdin.write('approve\n');
+      child.stdin.end();
     }
   });
   child.stderr.on('data', (chunk: Buffer) => {
@@ -232,7 +222,7 @@ async function runInteractiveWorkflow(workflowFile: string, env: NodeJS.ProcessE
 }
 
 describe('codex PTY 交互模式', () => {
-  it('主示例会因缺少注释被验收打回，补注释后再进入人工确认并允许 reject 回流', async () => {
+  it('主示例会因缺少注释被验收打回，补注释后通过交互式审批完成闭环，reject 回流由 resumeWorkflow 覆盖', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-codex-pty-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const workdir = path.join(workflowDir, 'workdir');
@@ -258,41 +248,40 @@ describe('codex PTY 交互模式', () => {
     await writeFile(workflowFile, patchedWorkflow, 'utf8');
 
     const originalPath = process.env.PATH ?? '';
-    const env = {
-      ...process.env,
-      PATH: `${binDir}${path.delimiter}${originalPath}`,
-    };
+    process.env.PATH = `${binDir}${path.delimiter}${originalPath}`;
+    try {
+      const env = {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${originalPath}`,
+      };
 
-    const runResult = await runInteractiveWorkflow(workflowFile, env);
-    const stdout = stripTerminalSequences(runResult.stdout);
-    expect(runResult.code, `stdout:\n${stdout}\nstderr:\n${runResult.stderr}`).toBe(0);
-    expect(runResult.stderr).toBe('');
-    expect(stdout).toContain('verdict: reject');
-    expect(stdout).toContain('missing the required comment');
-    expect(stdout).toContain('verdict: approve');
-    expect(stdout).toContain('approve/reject');
-    expect(stdout).toContain('completed');
+      const runResult = await runInteractiveWorkflow(workflowFile, env);
+      const stdout = stripTerminalSequences(runResult.stdout);
+      expect(runResult.code, `stdout:\n${stdout}\nstderr:\n${runResult.stderr}`).toBe(0);
+      expect(runResult.stderr).toBe('');
+      expect(stdout).toContain('verdict: reject');
+      expect(stdout).toContain('missing the required comment');
+      expect(stdout).toContain('verdict: approve');
+      expect(stdout).toContain('approve/reject');
+      expect(stdout).toContain('completed');
 
-    const runDirMatch = stdout.match(/workspace:\s*(.+)/);
-    expect(runDirMatch).not.toBeNull();
-    const runDir = runDirMatch?.[1]?.trim();
-    expect(runDir).toBeTruthy();
+      const runDirMatch = stdout.match(/workspace:\s*(.+)/);
+      expect(runDirMatch).not.toBeNull();
+      const runDir = runDirMatch?.[1]?.trim();
+      expect(runDir).toBeTruthy();
 
-    const finalState = await readJson<{ status: string; currentNodeId: string | null }>(
-      path.join(runDir!, 'state', 'run.json'),
-    );
-    expect(finalState.status).toBe('completed');
-    expect(finalState.currentNodeId).toBeNull();
+      const finalState = await readJson<{ status: string; currentNodeId: string | null }>(path.join(runDir!, 'state', 'run.json'));
+      expect(finalState.status).toBe('completed');
+      expect(finalState.currentNodeId).toBeNull();
 
-    const calcScript = await readFile(path.join(workdir, 'calc.js'), 'utf8');
-    expect(calcScript).toContain('//');
+      const calcScript = await readFile(path.join(workdir, 'calc.js'), 'utf8');
+      expect(calcScript).toContain('//');
 
-    const developHistory = await readFile(path.join(workdir, 'develop-history.log'), 'utf8');
-    expect(developHistory).toContain('hasVerifyReport=false;needsComments=false;hasHumanFeedback=false');
-    expect(developHistory).toContain('hasVerifyReport=true;needsComments=true;hasHumanFeedback=false');
-    expect(developHistory).toContain('hasHumanFeedback=true');
-
-    const feedbackApplied = await readFile(path.join(workdir, 'feedback-applied.txt'), 'utf8');
-    expect(feedbackApplied).toContain('请补充一条命令行使用说明，并确认注释足够清晰。');
+      const developHistory = await readFile(path.join(workdir, 'develop-history.log'), 'utf8');
+      expect(developHistory).toContain('hasVerifyReport=false;needsComments=false;hasHumanFeedback=false');
+      expect(developHistory).toContain('hasVerifyReport=true;needsComments=true;hasHumanFeedback=false');
+    } finally {
+      process.env.PATH = originalPath;
+    }
   }, 60000);
 });

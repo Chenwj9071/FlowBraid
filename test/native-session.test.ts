@@ -115,17 +115,19 @@ describe('native session state', () => {
     await appendNativeNodeEvent(messagesDir, {
       type: 'node.native.artifact',
       nodeId: 'develop',
+      attemptId: 'attempt-develop-1',
       at: '2026-05-05T00:00:05.000Z',
       file: 'artifacts\\develop-last-message.md',
     });
     await appendNativeNodeEvent(messagesDir, {
       type: 'node.native.completed',
       nodeId: 'develop',
+      attemptId: 'attempt-develop-1',
       at: '2026-05-05T00:00:10.000Z',
       summary: 'done',
     });
 
-    const event = await readLatestNativeTerminalEvent(messagesDir, 'develop');
+    const event = await readLatestNativeTerminalEvent(messagesDir, 'develop', 'attempt-develop-1');
     expect(event?.status).toBe('completed');
     expect(event?.result?.kind).toBe('complete');
     expect(event?.result?.summary).toBe('done');

@@ -88,6 +88,7 @@ export interface RunWorkspace {
   runDir: string;
   manifestPath: string;
   statePath: string;
+  timelinePath: string;
   stateDir: string;
   nodesDir: string;
   artifactsDir: string;
@@ -100,6 +101,7 @@ export interface RunState {
   workflowId: string;
   status: RunStatus;
   currentNodeId: string | null;
+  currentAttemptId?: string | null;
   pendingNodeId: string | null;
   resumeCount: number;
   stepCount: number;
@@ -111,12 +113,25 @@ export interface RunState {
 
 export interface NodeState {
   nodeId: string;
+  attemptId?: string;
   status: NodeStatus;
   startedAt?: string;
   finishedAt?: string;
   exitCode?: number | null;
   signal?: string | null;
   detail?: string;
+}
+
+export interface RunTimelineEntry {
+  stepIndex: number;
+  nodeId: string;
+  attemptId: string;
+  status: NodeStatus;
+  startedAt: string;
+  finishedAt?: string;
+  detail?: string;
+  outcome?: 'success' | 'failure' | 'paused';
+  nextNodeId?: string | null;
 }
 
 export interface ExecutionResult {
@@ -213,6 +228,7 @@ export interface NativeSessionResult {
 export interface NativeSessionState {
   mode: 'native_split_terminal';
   status: NativeSessionStatus;
+  attemptId?: string;
   sessionId?: string;
   terminalPid?: number;
   startedAt: string;

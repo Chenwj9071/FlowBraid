@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createRunId, nowIso, readJson, writeJson } from './utils.js';
-import { RunState, RunWorkspace, WorkflowDefinition } from './types.js';
+import { RunState, RunTimelineEntry, RunWorkspace, WorkflowDefinition } from './types.js';
 
 export async function createRunWorkspace(baseDir: string, workflow: WorkflowDefinition): Promise<RunWorkspace> {
   const runId = createRunId();
@@ -11,6 +11,7 @@ export async function createRunWorkspace(baseDir: string, workflow: WorkflowDefi
     runDir,
     manifestPath: path.join(runDir, 'manifest.json'),
     statePath: path.join(runDir, 'state', 'run.json'),
+    timelinePath: path.join(runDir, 'state', 'timeline.json'),
     stateDir: path.join(runDir, 'state'),
     nodesDir: path.join(runDir, 'nodes'),
     artifactsDir: path.join(runDir, 'artifacts'),
@@ -32,6 +33,7 @@ export async function initializeWorkspace(workspace: RunWorkspace, workflow: Wor
     workflow,
     createdAt: nowIso(),
   });
+  await writeJson(workspace.timelinePath, []);
 }
 
 export async function createInitialState(workspace: RunWorkspace, workflow: WorkflowDefinition): Promise<RunState> {
@@ -72,6 +74,7 @@ export async function loadManifest(runDir: string): Promise<{
     runDir,
     manifestPath: path.join(runDir, 'manifest.json'),
     statePath: path.join(runDir, 'state', 'run.json'),
+    timelinePath: path.join(runDir, 'state', 'timeline.json'),
     stateDir: path.join(runDir, 'state'),
     nodesDir: path.join(runDir, 'nodes'),
     artifactsDir: path.join(runDir, 'artifacts'),
@@ -82,4 +85,12 @@ export async function loadManifest(runDir: string): Promise<{
     workspace,
     manifest: await readManifest(workspace),
   };
+}
+
+export async function loadRunTimeline(workspace: RunWorkspace): Promise<RunTimelineEntry[]> {
+  return readJson<RunTimelineEntry[]>(workspace.timelinePath);
+}
+
+export async function persistRunTimeline(workspace: RunWorkspace, timeline: RunTimelineEntry[]): Promise<void> {
+  await writeJson(workspace.timelinePath, timeline);
 }

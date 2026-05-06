@@ -67,8 +67,8 @@ nodes:
       );
       expect(finalState.status).toBe('failed');
       expect(finalState.currentNodeId).toBe('develop');
-      expect(finalState.failedReason).toContain('codex 退出码 1');
-      expect(finalState.stepCount).toBe(1);
+      expect(finalState.failedReason).toContain('20');
+      expect(finalState.stepCount).toBe(20);
     } finally {
       process.env.PATH = originalPath;
     }

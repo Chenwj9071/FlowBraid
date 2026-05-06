@@ -97,4 +97,13 @@ describe('external terminal launcher', () => {
     expect(commandText).toContain('/F');
     expect(commandText).toContain('/PID 76096');
   });
+
+  it('builds a close command that swallows taskkill failures after the close attempt', () => {
+    const built = buildWindowsTerminalCloseCommand(76096);
+
+    const commandText = built.args[built.args.indexOf('-Command') + 1];
+    expect(commandText).toContain('try');
+    expect(commandText).toContain('catch');
+    expect(commandText).toContain('taskkill');
+  });
 });

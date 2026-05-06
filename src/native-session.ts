@@ -50,6 +50,8 @@ export async function appendNativeNodeEvent(messagesDir: string, payload: Record
 export async function readLatestNativeTerminalEvent(
   messagesDir: string,
   nodeId: string,
+  attemptId: string,
+  startedAt?: string,
 ): Promise<{
   status: 'completed' | 'failed' | 'paused';
   result: NonNullable<NativeSessionState['result']>;
@@ -66,11 +68,19 @@ export async function readLatestNativeTerminalEvent(
       const parsed = JSON.parse(lines[index]) as {
         type?: string;
         nodeId?: string;
+        attemptId?: string;
+        at?: string;
         summary?: string;
         message?: string;
         reason?: string;
       };
       if (parsed.nodeId !== nodeId) {
+        continue;
+      }
+      if (parsed.attemptId !== attemptId) {
+        continue;
+      }
+      if (startedAt && parsed.at && Date.parse(parsed.at) < Date.parse(startedAt)) {
         continue;
       }
       if (parsed.type === 'node.native.completed') {
@@ -105,7 +115,7 @@ export async function readLatestNativeTerminalEvent(
     }
   }
 
-  throw new Error(`No native terminal event found for node ${nodeId}`);
+  throw new Error(`No native terminal event found for node ${nodeId} attempt ${attemptId}`);
 }
 
 export async function readLatestCodexSessionId(cwd: string, rootDir = path.join(os.homedir(), '.codex', 'sessions')): Promise<string | null> {

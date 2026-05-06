@@ -43,7 +43,7 @@ export async function runInternalCodexNode(options: InternalCodexNodeOptions): P
     resolveRelative(workflowDirectory, codexNode.contextDir ?? manifest.workflow.contextDir) ?? workdir;
   const outputPath = path.join(nodeArtifactsDir, codexNode.outputFile ?? 'codex-last-message.md');
   const sessionPath = getExternalSessionPath(nodeDir);
-  const prompt = buildCodexPrompt(manifest.workflow, options.nodeId, codexNode, nodeDir, nodeArtifactsDir, workspace, {
+  const prompt = buildCodexPrompt(manifest.workflow, options.nodeId, state.currentAttemptId ?? 'internal-codex-node', codexNode, nodeDir, nodeArtifactsDir, workspace, {
     contextDir,
     workdir,
   });

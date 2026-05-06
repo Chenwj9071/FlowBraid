@@ -41,6 +41,7 @@ describe('codex native split demo', () => {
         setTimeout(async () => {
           const runDirs = await readDirNames(workspaceRoot);
           const runDir = path.join(workspaceRoot, runDirs[0]);
+          const attemptId = await readCurrentAttemptId(runDir);
           if (request.title.includes('develop')) {
             developCount += 1;
             const nodeDir = path.join(runDir, 'nodes', 'develop');
@@ -59,6 +60,7 @@ describe('codex native split demo', () => {
             await writeFile(path.join(nodeDir, 'artifacts', 'develop-last-message.md'), `develop round ${developCount}\n`, 'utf8');
             await writeNativeSessionState(getNativeSessionPath(nodeDir), {
               mode: 'native_split_terminal',
+              attemptId,
               status: 'completed',
               terminalPid,
               sessionId: `session-develop-${developCount}`,
@@ -98,6 +100,7 @@ describe('codex native split demo', () => {
           await writeFile(path.join(nodeDir, 'artifacts', 'verify-report.md'), report, 'utf8');
           await writeNativeSessionState(getNativeSessionPath(nodeDir), {
             mode: 'native_split_terminal',
+            attemptId,
             status: 'completed',
             terminalPid,
             sessionId: `session-verify-${verifyCount}`,
@@ -187,4 +190,14 @@ async function readDirNames(baseDir: string): Promise<string[]> {
   const fs = await import('node:fs/promises');
   const entries = await fs.readdir(baseDir, { withFileTypes: true });
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+}
+
+async function readCurrentAttemptId(runDir: string): Promise<string> {
+  const runState = JSON.parse(await readFile(path.join(runDir, 'state', 'run.json'), 'utf8')) as {
+    currentAttemptId?: string | null;
+  };
+  if (!runState.currentAttemptId) {
+    throw new Error(`Missing currentAttemptId for run ${runDir}`);
+  }
+  return runState.currentAttemptId;
 }

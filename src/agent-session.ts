@@ -48,6 +48,47 @@ export async function readAgentSessionMessages(...paths: string[]): Promise<Agen
       // ignore missing files before first turn
     }
   }
-  return all;
+  return all.sort(compareAgentSessionMessages);
 }
 
+function compareAgentSessionMessages(left: AgentSessionMessage, right: AgentSessionMessage): number {
+  const leftTurn = left.turn ?? Number.MAX_SAFE_INTEGER;
+  const rightTurn = right.turn ?? Number.MAX_SAFE_INTEGER;
+  if (leftTurn !== rightTurn) {
+    return leftTurn - rightTurn;
+  }
+
+  const leftRank = getAgentMessageRank(left);
+  const rightRank = getAgentMessageRank(right);
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  const leftTime = Date.parse(left.at);
+  const rightTime = Date.parse(right.at);
+  const leftHasTime = Number.isFinite(leftTime);
+  const rightHasTime = Number.isFinite(rightTime);
+  if (leftHasTime && rightHasTime && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  if (leftHasTime !== rightHasTime) {
+    return leftHasTime ? -1 : 1;
+  }
+
+  return left.content.localeCompare(right.content);
+}
+
+function getAgentMessageRank(message: AgentSessionMessage): number {
+  if (message.kind === 'message') {
+    if (message.role === 'system') {
+      return 0;
+    }
+    if (message.role === 'user') {
+      return 1;
+    }
+    if (message.role === 'assistant') {
+      return 2;
+    }
+  }
+  return 3;
+}

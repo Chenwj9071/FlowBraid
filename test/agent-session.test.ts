@@ -156,6 +156,11 @@ nodes:
     const finalMessages = await readAgentSessionMessages(inboxPath, outboxPath);
     expect(finalMessages.some((message) => message.kind === 'event' && message.type === 'session.completed')).toBe(true);
     expect(finalMessages.some((message) => message.kind === 'message' && message.role === 'assistant' && message.turn === 2)).toBe(true);
+    expect(
+      finalMessages
+        .filter((message) => message.kind === 'message')
+        .map((message) => `${message.turn ?? 0}:${message.role}`),
+    ).toEqual(['0:system', '0:user', '1:assistant', '2:user', '2:assistant']);
 
     const outputFile = await readFile(path.join(nodeDir, 'artifacts', 'turn-result.json'), 'utf8');
     expect(outputFile).toContain('"status": "completed"');

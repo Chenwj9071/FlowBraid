@@ -235,6 +235,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   const baseState = existingState ?? {
     mode: 'native_split_terminal',
     status: 'launching',
+    attemptId: flags['attempt-id'] ? String(flags['attempt-id']) : undefined,
     startedAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -242,9 +243,11 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   switch (subcommand) {
     case 'start': {
       const terminalPid = flags['terminal-pid'] ? Number(String(flags['terminal-pid'])) : undefined;
+      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const nextState: NativeSessionState = {
         ...baseState,
         mode: 'native_split_terminal',
+        attemptId,
         status: 'running',
         terminalPid,
         startedAt: baseState.startedAt,
@@ -254,6 +257,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.started',
         nodeId,
+        attemptId,
         at: nowIso(),
         terminalPid,
       });
@@ -262,15 +266,20 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'complete': {
       const summary = flags.summary ? String(flags.summary) : undefined;
+      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       await updateNativeSessionState(sessionPath, (current) =>
-        buildNativeTerminalState(current ?? baseState, 'completed', {
-          kind: 'complete',
-          summary,
+        ({
+          ...buildNativeTerminalState(current ?? baseState, 'completed', {
+            kind: 'complete',
+            summary,
+          }),
+          attemptId,
         }),
       );
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.completed',
         nodeId,
+        attemptId,
         at: nowIso(),
         summary,
       });
@@ -279,18 +288,21 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'fail': {
       const message = flags.message ? String(flags.message) : undefined;
+      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       if (!message) {
         throw new Error('node fail 需要 --message');
       }
-      await updateNativeSessionState(sessionPath, (current) =>
-        buildNativeTerminalState(current ?? baseState, 'failed', {
+      await updateNativeSessionState(sessionPath, (current) => ({
+        ...buildNativeTerminalState(current ?? baseState, 'failed', {
           kind: 'fail',
           message,
         }),
-      );
+        attemptId,
+      }));
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.failed',
         nodeId,
+        attemptId,
         at: nowIso(),
         message,
       });
@@ -299,18 +311,21 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'pause': {
       const reason = flags.reason ? String(flags.reason) : undefined;
+      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       if (!reason) {
         throw new Error('node pause 需要 --reason');
       }
-      await updateNativeSessionState(sessionPath, (current) =>
-        buildNativeTerminalState(current ?? baseState, 'paused', {
+      await updateNativeSessionState(sessionPath, (current) => ({
+        ...buildNativeTerminalState(current ?? baseState, 'paused', {
           kind: 'pause',
           reason,
         }),
-      );
+        attemptId,
+      }));
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.paused',
         nodeId,
+        attemptId,
         at: nowIso(),
         reason,
       });
@@ -319,18 +334,21 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'artifact': {
       const file = flags.file ? String(flags.file) : undefined;
+      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       if (!file) {
         throw new Error('node artifact 需要 --file');
       }
       await updateNativeSessionState(sessionPath, (current) => ({
         ...(current ?? baseState),
         mode: 'native_split_terminal',
+        attemptId,
         updatedAt: nowIso(),
         lastArtifactPath: file,
       }));
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.artifact',
         nodeId,
+        attemptId,
         at: nowIso(),
         file,
       });
@@ -338,11 +356,13 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     }
 
     case 'heartbeat': {
+      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       await updateNativeSessionState(sessionPath, (current) => {
         const effectiveState = current ?? baseState;
         return {
           ...effectiveState,
           mode: 'native_split_terminal',
+          attemptId,
           status: effectiveState.status === 'launching' ? 'running' : effectiveState.status,
           updatedAt: nowIso(),
           lastHeartbeatAt: nowIso(),
@@ -351,6 +371,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.heartbeat',
         nodeId,
+        attemptId,
         at: nowIso(),
       });
       return 0;

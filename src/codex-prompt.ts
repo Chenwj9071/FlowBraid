@@ -18,6 +18,7 @@ type RuntimeWorkflow = WorkflowDefinition & Partial<WorkflowSourceMeta>;
 export function buildCodexPrompt(
   workflow: RuntimeWorkflow,
   nodeId: string,
+  attemptId: string,
   node: CodexNodeDefinition,
   nodeDir: string,
   nodeArtifactsDir: string,
@@ -37,9 +38,9 @@ export function buildCodexPrompt(
   const protocolMode = options.protocolMode ?? 'standard';
   const resumeSession = options.resumeSession === true;
   const flowbraidNodePrefix = buildFlowBraidNodeCommandPrefix();
-  const completeCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --summary "done"`;
-  const failCommand = `${flowbraidNodePrefix} node fail --run-dir "${workspace.runDir}" --node-id "${nodeId}" --message "explain the failure"`;
-  const artifactCommand = `${flowbraidNodePrefix} node artifact --run-dir "${workspace.runDir}" --node-id "${nodeId}" --file "${path.join(
+  const completeCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --summary "done"`;
+  const failCommand = `${flowbraidNodePrefix} node fail --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --message "explain the failure"`;
+  const artifactCommand = `${flowbraidNodePrefix} node artifact --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --file "${path.join(
     'artifacts',
     node.outputFile ?? 'codex-last-message.md',
   )}"`;

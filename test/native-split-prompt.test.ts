@@ -59,6 +59,7 @@ nodes:
     const prompt = buildCodexPrompt(
       workflow,
       'develop',
+      'attempt-develop-1',
       workflow.nodes.develop as CodexNodeDefinition,
       path.join(runWorkspace.nodesDir, 'develop'),
       path.join(runWorkspace.nodesDir, 'develop', 'artifacts'),
@@ -74,6 +75,7 @@ nodes:
 
     expect(prompt).toContain('Native split terminal protocol:');
     expect(prompt).toContain('node complete --run-dir');
+    expect(prompt).toContain('--attempt-id "attempt-develop-1"');
     expect(prompt).toContain('node fail --run-dir');
     expect(prompt).toContain('node artifact --run-dir');
     expect(prompt).toContain('latest.verify.report:');
@@ -134,6 +136,7 @@ nodes:
     const prompt = buildCodexPrompt(
       workflow,
       'develop',
+      'attempt-develop-2',
       workflow.nodes.develop as CodexNodeDefinition,
       path.join(runWorkspace.nodesDir, 'develop'),
       path.join(runWorkspace.nodesDir, 'develop', 'artifacts'),

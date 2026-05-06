@@ -4,7 +4,7 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 
 ## 推荐演示
 
-当前主推荐示例是原生分离终端模式：
+当前主推演示是原生分离终端模式：
 
 ```bash
 npm run demo:native-split
@@ -27,6 +27,10 @@ npm run demo:native-split
   - 旧的 helper 包裹型分离终端原型，保留作兼容/实验用途
 - `npm run demo:session`
   - `agent_session` 长期交互示例
+
+## Workflow 编写指南
+
+- `workflow.yaml` 写法、字段含义、节点类型、运行语义、推荐用法和示例：见 `doc/workflow-authoring.md`
 
 ## 开发验证
 

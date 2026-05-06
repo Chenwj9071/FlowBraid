@@ -35,7 +35,7 @@ export function buildWindowsTerminalCloseCommand(terminalPid: number): { file: s
   const commandText = [
     '$ErrorActionPreference = "Stop"',
     `$p = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue`,
-    `if ($p) { & ${quotePowerShell('taskkill.exe')} /PID ${terminalPid} /T /F | Out-Null }`,
+    `if ($p) { try { & ${quotePowerShell('taskkill.exe')} /PID ${terminalPid} /T /F | Out-Null } catch { } }`,
   ].join('; ');
 
   return {

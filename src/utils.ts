@@ -29,6 +29,10 @@ export function createRunId(): string {
   return `${new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '')}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
+export function createAttemptId(): string {
+  return crypto.randomBytes(8).toString('hex');
+}
+
 export function resolveRelative(baseDir: string, value?: string): string | undefined {
   if (!value) {
     return undefined;

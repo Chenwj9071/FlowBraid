@@ -7,8 +7,16 @@ import {
   buildNativeCodexResumeInvocation,
 } from './executors/codex.js';
 import { runShellCommand } from './executors/shell.js';
-import { createInitialState, createRunWorkspace, loadManifest, loadRunState, persistRunState } from './workspace.js';
-import { appendText, ensureDir, nowIso, resolveRelative, writeJson } from './utils.js';
+import {
+  createInitialState,
+  createRunWorkspace,
+  loadManifest,
+  loadRunState,
+  loadRunTimeline,
+  persistRunState,
+  persistRunTimeline,
+} from './workspace.js';
+import { appendText, createAttemptId, ensureDir, nowIso, resolveRelative, writeJson } from './utils.js';
 import type {
   AgentSessionNodeDefinition,
   AgentSessionState,
@@ -27,6 +35,7 @@ import type {
   WorkflowSourceMeta,
   AgentSessionMessage,
   EndNodeDefinition,
+  RunTimelineEntry,
 } from './types.js';
 import { resolveApprovalNext, resolveNodeNext } from './workflow.js';
 import { RunInterruptedError, isAbortSignalTriggered } from './errors.js';
@@ -38,7 +47,6 @@ import { buildCodexPrompt } from './codex-prompt.js';
 import {
   appendNativeNodeEvent,
   getNativeSessionPath,
-  readLatestCodexSessionId,
   readLatestNativeTerminalEvent,
   readNativeSessionState,
   writeNativeSessionState,
@@ -190,6 +198,9 @@ export class FlowBraidEngine {
       state.stepCount += 1;
       await persistRunState(workspace, state);
       this.options.logger?.(`[run] step ${state.stepCount}: enter node ${currentNodeId} (${node.type})`);
+      const attemptId = createAttemptId();
+      state.currentAttemptId = attemptId;
+      await persistRunState(workspace, state);
 
       const nodeDir = path.join(workspace.nodesDir, currentNodeId);
       const nodeArtifactsDir = path.join(nodeDir, 'artifacts');
@@ -198,13 +209,21 @@ export class FlowBraidEngine {
 
       const nodeState: NodeState = {
         nodeId: currentNodeId,
+        attemptId,
         status: 'running',
         startedAt: nowIso(),
       };
       await writeJson(path.join(nodeDir, 'status.json'), nodeState);
+      await this.appendTimelineEntry(workspace, {
+        stepIndex: state.stepCount,
+        nodeId: currentNodeId,
+        attemptId,
+        status: 'running',
+        startedAt: nodeState.startedAt!,
+      });
       await appendText(
         path.join(workspace.messagesDir, 'events.jsonl'),
-        `${JSON.stringify({ type: 'node.started', nodeId: currentNodeId, at: nowIso() })}\n`,
+        `${JSON.stringify({ type: 'node.started', nodeId: currentNodeId, attemptId, at: nowIso() })}\n`,
       );
 
       let outcome: NodeOutcome = 'success';
@@ -225,7 +244,7 @@ export class FlowBraidEngine {
           nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
         } else if (node.type === 'codex') {
           if (this.options.nativeSplitTerminals) {
-            const execution = await this.runNativeSplitCodexNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir);
+            const execution = await this.runNativeSplitCodexNode(node, currentNodeId, attemptId, workspace, nodeDir, nodeArtifactsDir);
             exitCode = execution.exitCode;
             signal = execution.signal;
             outcome = execution.outcome;
@@ -245,24 +264,21 @@ export class FlowBraidEngine {
             if ((exitCode ?? 1) !== 0) {
               outcome = 'failure';
               detail = `codex 退出码 ${exitCode ?? 'null'}`;
-              nextNodeId = null;
             } else if (node.mode === 'review') {
               const verdict = await readReviewVerdict(path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'));
               if (verdict === 'reject') {
                 outcome = 'failure';
                 detail = 'review verdict=reject';
-                nextNodeId = resolveNodeNext(node, 'failure');
               } else if (verdict === 'approve') {
                 detail = 'review verdict=approve';
-                nextNodeId = resolveNodeNext(node, 'success');
               } else {
+                outcome = 'failure';
                 detail = 'codex review 完成，但未声明 verdict';
-                nextNodeId = null;
               }
             } else {
               detail = `codex ${node.mode} 完成`;
-              nextNodeId = resolveNodeNext(node, 'success');
             }
+            nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
           }
         } else if (node.type === 'agent_session') {
           const execution = await this.runAgentSessionNode(node, currentNodeId, workspace, nodeDir, nodeArtifactsDir, nodeLogPath, state);
@@ -306,7 +322,9 @@ export class FlowBraidEngine {
           detail = INTERRUPTED_REASON;
           nextNodeId = null;
         } else {
-          throw error;
+          outcome = 'failure';
+          detail = error instanceof Error ? error.message : String(error);
+          nextNodeId = resolveNodeNext(node, 'failure');
         }
       }
 
@@ -316,9 +334,16 @@ export class FlowBraidEngine {
       nodeState.signal = signal;
       nodeState.detail = detail;
       await writeJson(path.join(nodeDir, 'status.json'), nodeState);
+      await this.updateTimelineEntry(workspace, attemptId, {
+        status: nodeState.status,
+        finishedAt: nodeState.finishedAt,
+        detail,
+        outcome,
+        nextNodeId,
+      });
       await appendText(
         path.join(workspace.messagesDir, 'events.jsonl'),
-        `${JSON.stringify({ type: `node.${outcome}`, nodeId: currentNodeId, at: nowIso(), detail })}\n`,
+        `${JSON.stringify({ type: `node.${outcome}`, nodeId: currentNodeId, attemptId, at: nowIso(), detail })}\n`,
       );
 
       if (outcome === 'paused') {
@@ -337,6 +362,7 @@ export class FlowBraidEngine {
           this.options.logger?.(`[run] node ${currentNodeId} failed, route to ${nextNodeId}${detail ? `: ${detail}` : ''}`);
           currentNodeId = nextNodeId;
           state.currentNodeId = currentNodeId;
+          state.currentAttemptId = null;
           state.pendingNodeId = null;
           await persistRunState(workspace, state);
           continue;
@@ -344,6 +370,7 @@ export class FlowBraidEngine {
         this.options.logger?.(`[run] failed at ${currentNodeId}${detail ? `: ${detail}` : ''}`);
         state.status = 'failed';
         state.currentNodeId = currentNodeId;
+        state.currentAttemptId = attemptId;
         state.pendingNodeId = nextNodeId;
         state.failedReason = detail;
         await persistRunState(workspace, state);
@@ -357,12 +384,14 @@ export class FlowBraidEngine {
       );
       currentNodeId = nextNodeId;
       state.currentNodeId = currentNodeId;
+      state.currentAttemptId = null;
       state.pendingNodeId = null;
       await persistRunState(workspace, state);
     }
 
     state.status = 'completed';
     state.currentNodeId = null;
+    state.currentAttemptId = null;
     state.pendingNodeId = null;
     await persistRunState(workspace, state);
     this.options.logger?.('[run] completed');
@@ -414,7 +443,7 @@ export class FlowBraidEngine {
     const dirs = this.resolveNodeDirectories(node);
     const cwd = resolveRelative(this.workflow.directory, node.cwd) ?? dirs.contextDir;
     const outputFile = path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md');
-    const prompt = buildCodexPrompt(this.workflow, nodeId, node, nodeDir, nodeArtifactsDir, workspace, dirs);
+    const prompt = buildCodexPrompt(this.workflow, nodeId, state.currentAttemptId ?? createAttemptId(), node, nodeDir, nodeArtifactsDir, workspace, dirs);
     return runCodexTask({
       command: this.options.codexCommand,
       cwd,
@@ -522,6 +551,7 @@ export class FlowBraidEngine {
   private async runNativeSplitCodexNode(
     node: CodexNodeDefinition,
     nodeId: string,
+    attemptId: string,
     workspace: RunWorkspace,
     nodeDir: string,
     nodeArtifactsDir: string,
@@ -531,7 +561,7 @@ export class FlowBraidEngine {
     const sessionPath = getNativeSessionPath(nodeDir);
     const previousSession = await this.readResumableNativeSession(nodeDir);
     const shouldResume = !!previousSession?.sessionId;
-    const prompt = buildCodexPrompt(this.workflow, nodeId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
+    const prompt = buildCodexPrompt(this.workflow, nodeId, attemptId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
       protocolMode: 'native-split',
       resumeSession: shouldResume,
     });
@@ -555,6 +585,7 @@ export class FlowBraidEngine {
 
     await writeNativeSessionState(sessionPath, {
       mode: 'native_split_terminal',
+      attemptId,
       status: 'launching',
       startedAt,
       updatedAt: startedAt,
@@ -579,11 +610,11 @@ export class FlowBraidEngine {
     );
     this.options.logger?.(`[native] ${nodeId} terminal pid ${launched.terminalPid}`);
 
-    const terminalState = await this.waitForNativeSession(sessionPath, workspace.messagesDir, nodeId, launched.terminalPid);
-    const latestSessionId = await readLatestCodexSessionId(dirs.workdir);
+    const terminalState = await this.waitForNativeSession(sessionPath, workspace.messagesDir, nodeId, attemptId, launched.terminalPid, startedAt);
     const finalState: NativeSessionState = {
       ...terminalState,
-      sessionId: terminalState.sessionId ?? latestSessionId ?? previousSession?.sessionId,
+      attemptId,
+      sessionId: terminalState.sessionId ?? previousSession?.sessionId,
       terminalPid: terminalState.terminalPid ?? launched.terminalPid,
       updatedAt: nowIso(),
     };
@@ -591,6 +622,7 @@ export class FlowBraidEngine {
     await appendNativeNodeEvent(workspace.messagesDir, {
       type: 'terminal.close_requested',
       nodeId,
+      attemptId,
       terminalPid: launched.terminalPid,
       at: nowIso(),
     });
@@ -598,8 +630,21 @@ export class FlowBraidEngine {
 
     await delay(750);
 
-    await launcher.close(launched.terminalPid);
-    this.options.logger?.(`[native] ${nodeId} terminal close requested for pid ${launched.terminalPid}`);
+    try {
+      await launcher.close(launched.terminalPid);
+      this.options.logger?.(`[native] ${nodeId} terminal close requested for pid ${launched.terminalPid}`);
+    } catch (error) {
+      const closeErrorMessage = error instanceof Error ? error.message : String(error);
+      this.options.logger?.(`[native] ${nodeId} terminal close ignored for pid ${launched.terminalPid}: ${closeErrorMessage}`);
+      await appendNativeNodeEvent(workspace.messagesDir, {
+        type: 'terminal.close_ignored',
+        nodeId,
+        attemptId,
+        terminalPid: launched.terminalPid,
+        at: nowIso(),
+        message: closeErrorMessage,
+      });
+    }
 
     await writeNativeSessionState(sessionPath, {
       ...finalState,
@@ -882,22 +927,25 @@ export class FlowBraidEngine {
     sessionPath: string,
     messagesDir: string,
     nodeId: string,
+    attemptId: string,
     terminalPid: number,
+    startedAt: string,
   ): Promise<NativeSessionState> {
     const timeoutAt = Date.now() + 15 * 60_000;
     while (Date.now() < timeoutAt) {
       try {
         const state = await readNativeSessionState(sessionPath);
-        if (state.status === 'completed' || state.status === 'failed' || state.status === 'paused') {
+        if (state.attemptId === attemptId && (state.status === 'completed' || state.status === 'failed' || state.status === 'paused')) {
           return state;
         }
       } catch {
         // keep polling
       }
       try {
-        const event = await readLatestNativeTerminalEvent(messagesDir, nodeId);
+        const event = await readLatestNativeTerminalEvent(messagesDir, nodeId, attemptId, startedAt);
         return {
           mode: 'native_split_terminal',
+          attemptId,
           status: event.status,
           terminalPid,
           startedAt: nowIso(),
@@ -913,6 +961,7 @@ export class FlowBraidEngine {
 
     return {
       mode: 'native_split_terminal',
+      attemptId,
       status: 'failed',
       terminalPid,
       startedAt: nowIso(),
@@ -935,6 +984,26 @@ export class FlowBraidEngine {
     } catch {
       return null;
     }
+  }
+
+  private async appendTimelineEntry(workspace: RunWorkspace, entry: RunTimelineEntry): Promise<void> {
+    const timeline = await loadRunTimeline(workspace);
+    timeline.push(entry);
+    await persistRunTimeline(workspace, timeline);
+  }
+
+  private async updateTimelineEntry(
+    workspace: RunWorkspace,
+    attemptId: string,
+    patch: Partial<Pick<RunTimelineEntry, 'status' | 'finishedAt' | 'detail' | 'outcome' | 'nextNodeId'>>,
+  ): Promise<void> {
+    const timeline = await loadRunTimeline(workspace);
+    const target = timeline.find((entry) => entry.attemptId === attemptId);
+    if (!target) {
+      return;
+    }
+    Object.assign(target, patch);
+    await persistRunTimeline(workspace, timeline);
   }
 }
 
