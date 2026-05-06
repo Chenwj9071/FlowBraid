@@ -4,7 +4,6 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   buildInteractivePtyCommand,
-  buildInternalCodexNodeInvocation,
   buildNativeCodexResumeInvocation,
   buildNativeInteractiveCommand,
   runCodexTask,
@@ -62,47 +61,7 @@ describe('codex command helpers', () => {
     expect(commandText).toContain('please read AGENTS.md first');
   });
 
-  it('builds the split-terminal internal helper invocation for dist cli entry', () => {
-    const built = buildInternalCodexNodeInvocation(
-      'D:\\runs\\demo-123',
-      'develop',
-      'win32',
-      ['node.exe', 'D:\\Project\\FlowBraid\\dist\\cli.js'],
-    );
-
-    expect(built.command).toBe(process.execPath);
-    expect(built.args).toEqual([
-      'D:\\Project\\FlowBraid\\dist\\cli.js',
-      'internal',
-      'run-codex-node',
-      '--run-dir',
-      'D:\\runs\\demo-123',
-      '--node-id',
-      'develop',
-    ]);
-  });
-
-  it('builds the split-terminal internal helper invocation for source cli entry', () => {
-    const built = buildInternalCodexNodeInvocation(
-      '/tmp/run-demo',
-      'verify',
-      'linux',
-      ['node', '/workspace/FlowBraid/src/cli.ts'],
-    );
-
-    expect(built.command).toBe('tsx');
-    expect(built.args).toEqual([
-      '/workspace/FlowBraid/src/cli.ts',
-      'internal',
-      'run-codex-node',
-      '--run-dir',
-      '/tmp/run-demo',
-      '--node-id',
-      'verify',
-    ]);
-  });
-
-  it('builds a native Windows interactive command for split-terminal codex nodes', () => {
+  it('builds a native Windows interactive command for codex nodes', () => {
     const built = buildNativeInteractiveCommand(
       'codex',
       ['exec', '--cd', 'D:\\demo-workdir'],

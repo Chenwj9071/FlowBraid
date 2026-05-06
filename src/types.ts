@@ -151,7 +151,6 @@ export interface RunnerOptions {
   approvalDecision?: 'approve' | 'reject';
   approvalComment?: string;
   interactiveTerminal?: TerminalSession;
-  splitTerminals?: boolean;
   nativeSplitTerminals?: boolean;
   externalTerminalLauncher?: {
     launch(request: {
@@ -195,25 +194,6 @@ export interface AgentSessionMessage {
   content: string;
   at: string;
   turn?: number;
-}
-
-export type ExternalSessionStatus = 'launching' | 'running' | 'completed' | 'failed' | 'aborting';
-
-export interface ExternalSessionState {
-  mode: 'detached_terminal';
-  status: ExternalSessionStatus;
-  startedAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  terminalPid?: number;
-  workerPid?: number;
-  codexPid?: number;
-  exitCode?: number | null;
-  signal?: string | null;
-  resultFile?: string;
-  closeRequestedAt?: string;
-  closeObservedAt?: string;
-  error?: string;
 }
 
 export type NativeSessionStatus = 'launching' | 'running' | 'completed' | 'failed' | 'paused' | 'aborting';

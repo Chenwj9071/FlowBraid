@@ -428,31 +428,6 @@ export function buildNativeInteractiveCommand(
   };
 }
 
-export function buildInternalCodexNodeInvocation(
-  runDir: string,
-  nodeId: string,
-  platform: NodeJS.Platform = process.platform,
-  cliArgv: string[] = process.argv,
-): { command: string; args: string[] } {
-  const entryPath = cliArgv[1];
-  if (!entryPath) {
-    throw new Error('Cannot determine FlowBraid CLI entry path for split-terminal mode');
-  }
-
-  const commonArgs = ['internal', 'run-codex-node', '--run-dir', runDir, '--node-id', nodeId];
-  if (entryPath.endsWith('.ts')) {
-    return {
-      command: platform === 'win32' ? 'tsx.cmd' : 'tsx',
-      args: [entryPath, ...commonArgs],
-    };
-  }
-
-  return {
-    command: process.execPath,
-    args: [entryPath, ...commonArgs],
-  };
-}
-
 export function buildFlowBraidNodeCommandPrefix(
   platform: NodeJS.Platform = process.platform,
   cliArgv: string[] = process.argv,

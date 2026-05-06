@@ -629,8 +629,7 @@ flowbraid run path/to/workflow.yaml --workspace <runs-dir> --workdir <dir> --cod
 
 ```bash
 flowbraid run path/to/workflow.yaml --interactive
-flowbraid run path/to/workflow.yaml --interactive --split-terminals
-flowbraid run path/to/workflow.yaml --interactive --native-split-terminals
+flowbraid run path/to/workflow.yaml --interactive
 ```
 
 说明：
@@ -638,10 +637,9 @@ flowbraid run path/to/workflow.yaml --interactive --native-split-terminals
 - `--interactive`
   - 允许在当前终端中处理审批、门禁和会话继续输入
 
-- `--split-terminals`
   - `codex` 节点使用旧的 helper 包裹型分离终端模式
 
-- `--native-split-terminals`
+- ???????????????native split?
   - `codex` 节点使用原生 `codex` 分离终端模式
   - 主进程继续留在当前终端输出流程日志
   - 每个 `codex` 节点在独立窗口中运行
@@ -721,7 +719,7 @@ flowbraid send <run-dir> "继续消息"
 flowbraid validate path/to/workflow.yaml
 flowbraid run path/to/workflow.yaml
 flowbraid run path/to/workflow.yaml --interactive
-flowbraid run path/to/workflow.yaml --interactive --native-split-terminals
+flowbraid run path/to/workflow.yaml --interactive
 flowbraid resume <run-dir>
 flowbraid resume <run-dir> --decision approve
 flowbraid resume <run-dir> --decision reject --message "请补充错误处理"

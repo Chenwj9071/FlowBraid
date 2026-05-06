@@ -1,6 +1,8 @@
 import type { TerminalSession } from './types.js';
 
 const TERMINAL_RESET_SEQUENCE = [
+  '\r',
+  '\n',
   '\u001b[?1l',
   '\u001b[?25h',
   '\u001b[?66l',

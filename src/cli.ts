@@ -9,7 +9,6 @@ import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
 import { RunInterruptedError } from './errors.js';
 import { appendText, nowIso } from './utils.js';
 import { resetTerminalForPrompt } from './terminal.js';
-import { runInternalCodexNode } from './internal-codex-node.js';
 import { parseArgs } from './cli-args.js';
 import { buildRunnerOptionsFromFlags } from './runtime-options.js';
 import {
@@ -87,6 +86,7 @@ async function promptApprovalDecision(
     }
   } finally {
     rl.close();
+    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
@@ -106,6 +106,7 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
     }
   } finally {
     rl.close();
+    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
@@ -116,6 +117,7 @@ async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<str
     return await Promise.race([rl.question('agent> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
     rl.close();
+    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
@@ -126,6 +128,7 @@ async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
     return await Promise.race([rl.question('message> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
     rl.close();
+    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
@@ -135,7 +138,6 @@ async function runInteractiveWorkflow(
     workspaceRoot?: string;
     defaultWorkdir?: string;
     codexCommand?: string;
-    splitTerminals?: boolean;
     nativeSplitTerminals?: boolean;
     abortSignal?: AbortSignal;
     onRunDir?: (runDir: string) => void;
@@ -145,7 +147,6 @@ async function runInteractiveWorkflow(
     workspaceRoot: options.workspaceRoot,
     defaultWorkdir: options.defaultWorkdir,
     codexCommand: options.codexCommand,
-    splitTerminals: options.splitTerminals,
     nativeSplitTerminals: options.nativeSplitTerminals,
     abortSignal: options.abortSignal,
     interactiveTerminal: { input: process.stdin, output: process.stdout },
@@ -169,7 +170,6 @@ async function runInteractiveWorkflow(
         approvalDecision: approval.decision,
         approvalComment: approval.comment,
         codexCommand: options.codexCommand,
-        splitTerminals: options.splitTerminals,
         nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
@@ -183,7 +183,6 @@ async function runInteractiveWorkflow(
       await promptGateContinue(currentNode.prompt ?? '', options.abortSignal);
       result = await resumeWorkflow(result.runDir, {
         codexCommand: options.codexCommand,
-        splitTerminals: options.splitTerminals,
         nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
@@ -203,7 +202,6 @@ async function runInteractiveWorkflow(
       }
       result = await sendWorkflow(result.runDir, message, {
         codexCommand: options.codexCommand,
-        splitTerminals: options.splitTerminals,
         nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
@@ -442,7 +440,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
             defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
             codexCommand,
-            splitTerminals: flags['split-terminals'] === true,
             nativeSplitTerminals: flags['native-split-terminals'] === true,
             abortSignal: interruptContext.controller.signal,
             onRunDir: (runDir) => {
@@ -521,6 +518,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             abortSignal: interruptContext.controller.signal,
             logger: (line) => console.log(line),
           }),
+          nativeSplitTerminals: flags['native-split-terminals'] === true,
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
@@ -564,6 +562,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             interactiveTerminal: { input: process.stdin, output: process.stdout },
             logger: (line) => console.log(line),
           }),
+          nativeSplitTerminals: flags['native-split-terminals'] === true,
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
@@ -583,24 +582,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
     if (command === 'node') {
       return handleNodeCommand(rest[0], flags);
-    }
-
-    if (command === 'internal') {
-      const subcommand = rest[0];
-      if (subcommand === 'run-codex-node') {
-        const runDir = flags['run-dir'] ? path.resolve(String(flags['run-dir'])) : undefined;
-        const nodeId = flags['node-id'] ? String(flags['node-id']) : undefined;
-        if (!runDir || !nodeId) {
-          throw new Error('internal run-codex-node 需要 --run-dir 和 --node-id');
-        }
-        const codexCommand = resolveCodexCommand(flags);
-        const result = await runInternalCodexNode({
-          runDir,
-          nodeId,
-          codexCommand,
-        });
-        return result.status === 'failed' ? 1 : 0;
-      }
     }
 
     printUsage();

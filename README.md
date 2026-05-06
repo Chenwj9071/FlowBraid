@@ -23,7 +23,6 @@ npm run demo:native-split
 
 - `npm run demo:pty`
   - 现有单终端 PTY 交互模式
-- `npm run demo:split`
   - 旧的 helper 包裹型分离终端原型，保留作兼容/实验用途
 - `npm run demo:session`
   - `agent_session` 长期交互示例

@@ -15,5 +15,5 @@ Set-Location $repoRoot
 
 $workflow = if ($args.Length -gt 0 -and $args[0]) { $args[0] } else { 'examples/codex-native-split-demo.workflow.yaml' }
 
-npx tsx src/cli.ts run $workflow --interactive --native-split-terminals
+npx tsx src/cli.ts run $workflow --interactive
 exit $LASTEXITCODE

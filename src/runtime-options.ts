@@ -22,7 +22,6 @@ export function buildRunnerOptionsFromFlags(
     abortSignal: extras.abortSignal,
     interactiveTerminal: extras.interactiveTerminal,
     logger: extras.logger,
-    splitTerminals: flags['split-terminals'] === true,
     nativeSplitTerminals: flags['native-split-terminals'] === true,
   };
 }

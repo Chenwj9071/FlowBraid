@@ -2,7 +2,6 @@ import path from 'node:path';
 import { mkdir, readFile } from 'node:fs/promises';
 import {
   runCodexTask,
-  buildInternalCodexNodeInvocation,
   buildNativeCodexCliInvocation,
   buildNativeCodexResumeInvocation,
 } from './executors/codex.js';
@@ -23,7 +22,6 @@ import type {
   ApprovalNodeDefinition,
   CodexNodeDefinition,
   ExecutionResult,
-  ExternalSessionState,
   GateNodeDefinition,
   NativeSessionState,
   NodeState,
@@ -39,7 +37,6 @@ import type {
 } from './types.js';
 import { resolveApprovalNext, resolveNodeNext } from './workflow.js';
 import { RunInterruptedError, isAbortSignalTriggered } from './errors.js';
-import { getExternalSessionPath, readExternalSessionState, writeExternalSessionState } from './external-session.js';
 import { appendAgentSessionMessage, getAgentSessionPaths, readAgentSessionMessages, readAgentSessionState, writeAgentSessionState } from './agent-session.js';
 import { runCodexSessionTurn } from './session-providers/codex.js';
 import { createExternalTerminalLauncher } from './terminal-launchers/index.js';
@@ -245,13 +242,6 @@ export class FlowBraidEngine {
         } else if (node.type === 'codex') {
           if (this.options.nativeSplitTerminals) {
             const execution = await this.runNativeSplitCodexNode(node, currentNodeId, attemptId, workspace, nodeDir, nodeArtifactsDir);
-            exitCode = execution.exitCode;
-            signal = execution.signal;
-            outcome = execution.outcome;
-            detail = execution.detail;
-            nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
-          } else if (this.options.splitTerminals && this.options.interactiveTerminal) {
-            const execution = await this.runDetachedCodexNode(node, currentNodeId, workspace, nodeDir);
             exitCode = execution.exitCode;
             signal = execution.signal;
             outcome = execution.outcome;
@@ -470,82 +460,6 @@ export class FlowBraidEngine {
       },
       onLine: (line) => this.options.logger?.(`[${nodeId}] ${line}`),
     });
-  }
-
-  private async runDetachedCodexNode(
-    node: CodexNodeDefinition,
-    nodeId: string,
-    workspace: RunWorkspace,
-    nodeDir: string,
-  ): Promise<{ exitCode: number | null; signal: string | null; outcome: 'success' | 'failure'; detail: string }> {
-    const dirs = this.resolveNodeDirectories(node);
-    const launcher = this.options.externalTerminalLauncher ?? createExternalTerminalLauncher();
-    const invocation = buildInternalCodexNodeInvocation(workspace.runDir, nodeId);
-    const sessionPath = getExternalSessionPath(nodeDir);
-    const resultFile = path.join('artifacts', node.outputFile ?? 'codex-last-message.md');
-    const startedAt = nowIso();
-
-    await writeExternalSessionState(sessionPath, {
-      mode: 'detached_terminal',
-      status: 'launching',
-      startedAt,
-      updatedAt: startedAt,
-      workerPid: process.pid,
-      resultFile,
-    });
-
-    const launched = await launcher.launch({
-      title: `FlowBraid ${nodeId}`,
-      workingDirectory: dirs.contextDir,
-      command: invocation.command,
-      args: invocation.args,
-    });
-
-    await appendText(
-      path.join(workspace.messagesDir, 'events.jsonl'),
-      `${JSON.stringify({ type: 'terminal.launched', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
-    );
-
-    let externalState = await this.waitForExternalSession(sessionPath);
-    externalState = {
-      ...externalState,
-      terminalPid: externalState.terminalPid ?? launched.terminalPid,
-      closeRequestedAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    await writeExternalSessionState(sessionPath, externalState);
-    await appendText(
-      path.join(workspace.messagesDir, 'events.jsonl'),
-      `${JSON.stringify({ type: 'terminal.close_requested', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
-    );
-
-    await launcher.close(launched.terminalPid);
-
-    externalState = {
-      ...externalState,
-      closeObservedAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    await writeExternalSessionState(sessionPath, externalState);
-    await appendText(
-      path.join(workspace.messagesDir, 'events.jsonl'),
-      `${JSON.stringify({ type: 'terminal.closed', nodeId, terminalPid: launched.terminalPid, at: nowIso() })}\n`,
-    );
-
-    const outcome = externalState.status === 'completed' ? 'success' : 'failure';
-    const detail =
-      node.mode === 'review'
-        ? outcome === 'success'
-          ? 'review verdict=approve'
-          : 'review verdict=reject'
-        : `codex ${node.mode} ${externalState.status}`;
-
-    return {
-      exitCode: externalState.exitCode ?? (outcome === 'success' ? 0 : 1),
-      signal: externalState.signal ?? null,
-      outcome,
-      detail,
-    };
   }
 
   private async runNativeSplitCodexNode(
@@ -907,22 +821,6 @@ export class FlowBraidEngine {
     return { contextDir, workdir };
   }
 
-  private async waitForExternalSession(sessionPath: string): Promise<ExternalSessionState> {
-    const timeoutAt = Date.now() + 15 * 60_000;
-    while (Date.now() < timeoutAt) {
-      try {
-        const state = await readExternalSessionState(sessionPath);
-        if (state.status === 'completed' || state.status === 'failed') {
-          return state;
-        }
-      } catch {
-        // keep polling
-      }
-      await delay(100);
-    }
-    throw new Error(`等待 external session 超时: ${sessionPath}`);
-  }
-
   private async waitForNativeSession(
     sessionPath: string,
     messagesDir: string,
@@ -943,16 +841,18 @@ export class FlowBraidEngine {
       }
       try {
         const event = await readLatestNativeTerminalEvent(messagesDir, nodeId, attemptId, startedAt);
-        return {
-          mode: 'native_split_terminal',
-          attemptId,
-          status: event.status,
-          terminalPid,
-          startedAt: nowIso(),
-          updatedAt: nowIso(),
-          completedAt: nowIso(),
-          result: event.result,
-        };
+        if (event.status === 'completed' || event.status === 'failed' || event.status === 'paused') {
+          return {
+            mode: 'native_split_terminal',
+            attemptId,
+            status: event.status,
+            terminalPid,
+            startedAt,
+            updatedAt: nowIso(),
+            completedAt: nowIso(),
+            result: event.result,
+          };
+        }
       } catch {
         // keep polling
       }

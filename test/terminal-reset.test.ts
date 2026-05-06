@@ -28,5 +28,6 @@ describe('terminal reset', () => {
 
     expect(fakeInput.isRaw).toBe(false);
     expect(writes).toEqual([getTerminalResetSequence()]);
+    expect(writes[0].startsWith('\r\n')).toBe(true);
   });
 });
