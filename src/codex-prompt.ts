@@ -11,6 +11,7 @@ export interface CodexPromptDirectories {
 export interface CodexPromptOptions {
   protocolMode?: 'standard' | 'native-split';
   resumeSession?: boolean;
+  includeReentryHistory?: boolean;
 }
 
 type RuntimeWorkflow = WorkflowDefinition & Partial<WorkflowSourceMeta>;
@@ -37,6 +38,7 @@ export function buildCodexPrompt(
       : 'You are the development node. Start from context.dir for your role instructions, but modify the shared business files inside workdir and deliver a runnable result.';
   const protocolMode = options.protocolMode ?? 'standard';
   const resumeSession = options.resumeSession === true;
+  const includeReentryHistory = options.includeReentryHistory !== false;
   const flowbraidNodePrefix = buildFlowBraidNodeCommandPrefix();
   const completeCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --summary "done"`;
   const failCommand = `${flowbraidNodePrefix} node fail --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --message "explain the failure"`;
@@ -61,12 +63,11 @@ export function buildCodexPrompt(
       '- This node was resumed because the workflow looped back to it.',
       '- Keep the existing session context and continue from the current state.',
       '- Do not ask for the original task again and do not restart from scratch.',
-      '- Focus only on the latest verification report and latest human feedback below.',
+      '- Focus only on the latest re-entry reason and the latest workflow context below.',
       '',
-      'latest.verify.report:',
-      latestVerifyReport,
-      'latest.human.feedback:',
-      latestHumanFeedback,
+      includeReentryHistory
+        ? ['latest.verify.report:', latestVerifyReport, 'latest.human.feedback:', latestHumanFeedback].join('\n')
+        : 'Re-entry context is intentionally minimal for this round.',
       '',
       node.mode === 'review'
         ? 'Re-entry task: rerun verification against the latest deliverable, produce an updated verdict, and report only the incremental outcome required for this round.'
@@ -142,6 +143,32 @@ export function buildCodexPrompt(
         ].join('\n')
       : null,
   ].join('\n');
+}
+
+export function buildNewSessionReentryPrompt(
+  workflow: RuntimeWorkflow,
+  nodeId: string,
+  attemptId: string,
+  node: CodexNodeDefinition,
+  workspace: RunWorkspace,
+  dirs: CodexPromptDirectories,
+  options: Pick<CodexPromptOptions, 'protocolMode'> & { includeHistory?: boolean } = {},
+): string {
+  return buildCodexPrompt(
+    workflow,
+    nodeId,
+    attemptId,
+    node,
+    '',
+    '',
+    workspace,
+    dirs,
+    {
+      protocolMode: options.protocolMode,
+      resumeSession: true,
+      includeReentryHistory: options.includeHistory !== false,
+    },
+  );
 }
 
 function tryReadPromptContextSync(filePath: string, maxChars = 4000): string | null {

@@ -22,6 +22,12 @@ export interface WorkflowBaseNode {
   };
 }
 
+export type CodexReentryMode = 'resume' | 'new_with_history' | 'new';
+
+export interface CodexReentryOptions {
+  mode?: CodexReentryMode;
+}
+
 export interface ShellNodeDefinition extends WorkflowBaseNode {
   type: 'shell';
   command: string;
@@ -39,6 +45,7 @@ export interface CodexNodeDefinition extends WorkflowBaseNode {
   contextDir?: string;
   model?: string;
   outputFile?: string;
+  reentry?: CodexReentryOptions;
 }
 
 export interface AgentSessionNodeDefinition extends WorkflowBaseNode {
@@ -114,6 +121,7 @@ export interface RunState {
 export interface NodeState {
   nodeId: string;
   attemptId?: string;
+  sessionId?: string;
   status: NodeStatus;
   startedAt?: string;
   finishedAt?: string;

@@ -1,7 +1,7 @@
 import type { RunnerOptions, TerminalSession } from './types.js';
 
 export function buildRunnerOptionsFromFlags(
-  flags: Record<string, string | boolean>,
+  _flags: Record<string, string | boolean>,
   extras: {
     workspaceRoot?: string;
     defaultWorkdir?: string;
@@ -10,6 +10,7 @@ export function buildRunnerOptionsFromFlags(
     approvalComment?: string;
     abortSignal?: AbortSignal;
     interactiveTerminal?: TerminalSession;
+    nativeSplitTerminals?: boolean;
     logger?: (line: string) => void;
   } = {},
 ): RunnerOptions {
@@ -22,6 +23,6 @@ export function buildRunnerOptionsFromFlags(
     abortSignal: extras.abortSignal,
     interactiveTerminal: extras.interactiveTerminal,
     logger: extras.logger,
-    nativeSplitTerminals: flags['native-split-terminals'] === true,
+    nativeSplitTerminals: extras.nativeSplitTerminals,
   };
 }

@@ -118,6 +118,15 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
     if ((node.mode !== 'exec' && node.mode !== 'review') || typeof node.prompt !== 'string' || node.prompt.trim() === '') {
       throw new WorkflowError(`codex 节点 ${nodeId} 必须提供 mode(exec|review) 和非空 prompt`);
     }
+    if (
+      node.reentry &&
+      node.reentry.mode !== undefined &&
+      node.reentry.mode !== 'resume' &&
+      node.reentry.mode !== 'new_with_history' &&
+      node.reentry.mode !== 'new'
+    ) {
+      throw new WorkflowError(`codex 节点 ${nodeId} 的 reentry.mode 只能是 resume、new_with_history 或 new`);
+    }
   }
   if (node.type === 'agent_session') {
     if (node.provider !== 'codex') {

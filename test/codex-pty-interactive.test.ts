@@ -180,8 +180,8 @@ async function runInteractiveWorkflow(workflowFile: string, env: NodeJS.ProcessE
   const command = process.platform === 'win32' ? 'cmd.exe' : 'npx';
   const cliArgs =
     process.platform === 'win32'
-      ? ['/c', 'npx', 'tsx', 'src/cli.ts', 'run', workflowFile, '--interactive']
-      : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive'];
+      ? ['/c', 'npx', 'tsx', 'src/cli.ts', 'run', workflowFile, '--interactive', '--pty']
+      : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive', '--pty'];
   const child = spawn(command, cliArgs, {
     cwd: process.cwd(),
     env,

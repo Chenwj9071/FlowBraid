@@ -17,6 +17,7 @@
 - 已支持 `contextDir` / `workdir` 双目录模型
 - Windows PTY 路径已显式切换到 UTF-8 控制台后再启动交互式 `codex`
 - native split 路径已补上 `attemptId` 和 `timeline` 机制，用于隔离同一节点的多轮回流执行
+- `codex` 节点已支持节点级 `reentry.mode`，默认回流优先使用 `codex resume` 恢复同节点历史会话
 
 ## 已完成里程碑
 1. 冻结需求、架构和技术选型文档
@@ -33,6 +34,7 @@
 12. 支持节点双目录执行：角色目录定义身份，共享工作目录承载真实业务修改
 13. 为 Windows PTY 链路补上 UTF-8 控制台启动
 14. 为 native split 补上 `attemptId`、`currentAttemptId`、`timeline.json` 和按 attempt 隔离的事件消费
+15. 为 `codex` 节点补上 `reentry.mode`，并在 native split 下默认按节点自己的 `sessionId` 恢复会话
 
 ## 已验证内容
 - `npx tsc -p tsconfig.json --noEmit` 通过
@@ -47,6 +49,7 @@
   - 回流到同一节点时优先使用该节点自己的 sessionId 恢复
   - 共享 `workdir` 下不会串用其他节点的 sessionId
   - 新 attempt 不会误消费旧 attempt 的完成事件
+  - 主进程启动 native codex 节点后会主动探测并持久化最新 `sessionId`
 
 ## 当前默认行为
 - workflow 文件所在目录是默认工作目录
@@ -55,6 +58,7 @@
 - `agent_session` 使用 `send` 继续，不走 `resume`
 - 如果节点未单独声明 `contextDir`，默认回退到当前节点的 `workdir`
 - native split 回流节点时，只消费当前 `attemptId` 的 session 状态和事件
+- `codex` 节点回流策略默认是 `reentry.mode: resume`
 
 ## 最近一次重点改动
 - 为每次节点进入生成唯一 `attemptId`，并写入：
@@ -67,14 +71,19 @@
 - `cli node start|complete|fail|pause|artifact|heartbeat` 已补 `--attempt-id`
 - `codex` native prompt 已注入 `--attempt-id`
 - 修复 native split 测试桩，确保测试中的 session 状态写入当前 attemptId
+- `codex` 节点新增 `reentry.mode: resume|new_with_history|new`
+- native split 启动后主进程会按 `workdir + startedAt` 主动探测新会话 `sessionId`，并写入：
+  - `nodes/<node-id>/state/native-session.json.sessionId`
+  - `nodes/<node-id>/status.json.sessionId`
 
 ## 后续建议
-1. 补齐真实 native codex 会话的 `sessionId` 回传链路，避免回流节点总是 `new codex session`
-2. 增加 `flowbraid status`，直接查看当前 run、当前节点、当前 attempt 和最近事件
-3. 为 `timeline.json` 增加更明确的 CLI 展示或调试输出
-4. 继续观察真实 Windows 终端下的 native split 行为，必要时补充更细粒度的 terminal / session 诊断日志
+1. 已增加 `flowbraid status`，可直接查看当前 run、当前节点、当前 attempt、sessionId 和最近 timeline 摘要
+2. 为 `timeline.json` 增加更明确的 CLI 展示或调试输出
+3. 继续观察真实 Windows 终端下的 native split 行为，必要时补充更细粒度的 terminal / session 诊断日志
+4. 评估是否需要把 `sessionId` 同步纳入更高层的 run 级概览状态
 
 ## 维护规则
 - 每次做完一轮明确功能，更新这里
 - 如果默认行为或状态协议变了，先更新这里，再改代码
 - 新 agent 启动前优先读取本文件，避免沿用过期上下文
+

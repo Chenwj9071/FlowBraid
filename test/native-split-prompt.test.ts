@@ -157,4 +157,62 @@ nodes:
     expect(prompt).toContain('please add a brief usage note');
     expect(prompt).not.toContain(`Task:\n${originalTask}`);
   });
+
+  it('supports minimal re-entry prompt without historical context', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-split-prompt-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    const workspaceRoot = path.join(workflowDir, '.flowbraid-runs');
+    await mkdir(workflowDir, { recursive: true });
+    await mkdir(path.join(workflowDir, 'context'), { recursive: true });
+    await mkdir(path.join(workflowDir, 'shared-workdir'), { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(
+      workflowFile,
+      `
+id: native-split-reentry-minimal-demo
+workdir: ./shared-workdir
+contextDir: ./context
+start: develop
+nodes:
+  develop:
+    type: codex
+    mode: exec
+    prompt: implement calc
+    next: done
+  done:
+    type: end
+    message: done
+`,
+      'utf8',
+    );
+
+    const workflow = await loadWorkflowFile(workflowFile);
+    const runWorkspace = await createRunWorkspace(workspaceRoot, workflow);
+    await createInitialState(runWorkspace, workflow);
+
+    const prompt = buildCodexPrompt(
+      workflow,
+      'develop',
+      'attempt-develop-3',
+      workflow.nodes.develop as CodexNodeDefinition,
+      path.join(runWorkspace.nodesDir, 'develop'),
+      path.join(runWorkspace.nodesDir, 'develop', 'artifacts'),
+      runWorkspace,
+      {
+        contextDir: path.join(workflowDir, 'context'),
+        workdir: path.join(workflowDir, 'shared-workdir'),
+      },
+      {
+        protocolMode: 'native-split',
+        resumeSession: true,
+        includeReentryHistory: false,
+      },
+    );
+
+    expect(prompt).toContain('Continue the existing development session');
+    expect(prompt).toContain('Re-entry context is intentionally minimal for this round.');
+    expect(prompt).not.toContain('latest.verify.report:');
+    expect(prompt).not.toContain('latest.human.feedback:');
+  });
 });

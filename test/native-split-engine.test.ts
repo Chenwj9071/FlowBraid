@@ -259,6 +259,115 @@ nodes:
     expect(resumedDevelopLaunch.args[0]).toBe('resume');
     expect(resumedDevelopLaunch.args[1]).toBe('node-develop-session-1');
     expect(resumedDevelopLaunch.args).not.toContain('--last');
+    const developStatus = JSON.parse(await readFile(path.join(result.runDir, 'nodes', 'develop', 'status.json'), 'utf8')) as {
+      sessionId?: string;
+    };
+    expect(developStatus.sessionId).toBe('node-develop-session-1');
+  }, 15000);
+
+  it('falls back to new session with history when reentry defaults to resume but no prior session id exists', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-split-engine-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    const workspaceRoot = path.join(workflowDir, '.flowbraid-runs');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    const workflowText = `
+id: native-split-default-reentry-fallback-demo
+workdir: .
+contextDir: .
+start: develop
+nodes:
+  develop:
+    type: codex
+    mode: exec
+    prompt: implement calc
+    transitions:
+      success: verify
+  verify:
+    type: codex
+    mode: review
+    prompt: verify calc
+    transitions:
+      success: done
+      failure: develop
+  done:
+    type: end
+    message: done
+`;
+    await writeFile(workflowFile, workflowText, 'utf8');
+    const workflow = await loadWorkflowFile(workflowFile);
+
+    let developLaunchCount = 0;
+    const launchedRequests: Array<{ title: string; command: string; args: string[] }> = [];
+    const launcher = {
+      async launch(request: { title: string; command: string; args: string[] }): Promise<{ terminalPid: number }> {
+        launchedRequests.push({ title: request.title, command: request.command, args: request.args });
+        const terminalPid = 9700 + launchedRequests.length;
+        setTimeout(async () => {
+          const runDirs = await readDirNames(workspaceRoot);
+          const runDir = path.join(workspaceRoot, runDirs[0]);
+          const attemptId = await readCurrentAttemptId(runDir);
+          if (request.title.includes('develop')) {
+            developLaunchCount += 1;
+            const nodeDir = path.join(runDir, 'nodes', 'develop');
+            await writeFile(path.join(nodeDir, 'artifacts', 'develop.md'), '# develop complete\n', 'utf8');
+            await writeNativeSessionState(getNativeSessionPath(nodeDir), {
+              mode: 'native_split_terminal',
+              attemptId,
+              status: 'completed',
+              terminalPid,
+              startedAt: '2026-05-06T00:00:00.000Z',
+              updatedAt: '2026-05-06T00:00:10.000Z',
+              completedAt: '2026-05-06T00:00:10.000Z',
+              result: {
+                kind: 'complete',
+                summary: `develop ${developLaunchCount}`,
+              },
+            });
+            return;
+          }
+
+          const nodeDir = path.join(runDir, 'nodes', 'verify');
+          await writeFile(
+            path.join(nodeDir, 'artifacts', 'codex-last-message.md'),
+            developLaunchCount === 1 ? 'verdict: reject\n' : 'verdict: approve\n',
+            'utf8',
+          );
+          await writeNativeSessionState(getNativeSessionPath(nodeDir), {
+            mode: 'native_split_terminal',
+            attemptId,
+            status: 'completed',
+            terminalPid,
+            sessionId: `node-verify-session-${developLaunchCount}`,
+            startedAt: '2026-05-06T00:00:20.000Z',
+            updatedAt: '2026-05-06T00:00:30.000Z',
+            completedAt: '2026-05-06T00:00:30.000Z',
+            result: {
+              kind: 'complete',
+              summary: `verify ${developLaunchCount}`,
+            },
+          });
+        }, 50);
+        return { terminalPid };
+      },
+      async close(): Promise<void> {
+        return;
+      },
+    };
+
+    const result = await startWorkflow(workflow, {
+      workspaceRoot,
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+    });
+
+    expect(result.status).toBe('completed');
+    const resumedDevelopLaunch = launchedRequests.filter((request) => request.title.includes('develop'))[1];
+    expect(resumedDevelopLaunch.command).toBe('codex');
+    expect(resumedDevelopLaunch.args[0]).not.toBe('resume');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('Continue the existing development session');
   }, 15000);
 
   it('does not adopt another node session id from the shared workdir when the current node did not report one', async () => {

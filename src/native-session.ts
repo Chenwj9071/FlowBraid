@@ -141,6 +141,43 @@ export async function readLatestCodexSessionId(cwd: string, rootDir = path.join(
   }
 }
 
+export async function readLatestCodexSessionIdAfter(
+  cwd: string,
+  notBefore: string,
+  excludeSessionId?: string,
+  rootDir = path.join(os.homedir(), '.codex', 'sessions'),
+): Promise<string | null> {
+  try {
+    const files = await collectSessionFiles(rootDir);
+    const ranked = await Promise.all(
+      files.map(async (filePath) => ({
+        filePath,
+        stat: await stat(filePath),
+      })),
+    );
+    ranked.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+
+    for (const entry of ranked) {
+      if (entry.stat.mtimeMs < Date.parse(notBefore)) {
+        continue;
+      }
+      const session = await readSessionMeta(entry.filePath);
+      if (!session) {
+        continue;
+      }
+      if (excludeSessionId && session.id === excludeSessionId) {
+        continue;
+      }
+      if (normalizePath(session.cwd) === normalizePath(cwd)) {
+        return session.id;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function collectSessionFiles(rootDir: string): Promise<string[]> {
   const pending = [rootDir];
   const files: string[] = [];

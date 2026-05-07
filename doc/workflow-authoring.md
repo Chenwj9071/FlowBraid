@@ -1,31 +1,31 @@
-# FlowBraid Workflow 编写指南
+﻿# FlowBraid Workflow 缂栧啓鎸囧崡
 
-本文说明 `workflow.yaml` / `workflow.yml` / `workflow.json` 的写法、字段含义、运行语义和推荐用法。
+鏈枃璇存槑 `workflow.yaml` / `workflow.yml` / `workflow.json` 鐨勫啓娉曘€佸瓧娈靛惈涔夈€佽繍琛岃涔夊拰鎺ㄨ崘鐢ㄦ硶銆?
 
-目标读者：
+鐩爣璇昏€咃細
 
-- 需要自己编排 FlowBraid 工作流的人
-- 想理解 `workdir` / `contextDir` / `approval` / `agent_session` 语义的人
-- 想参考推荐模式和避免常见坑的人
+- 闇€瑕佽嚜宸辩紪鎺?FlowBraid 宸ヤ綔娴佺殑浜?
+- 鎯崇悊瑙?`workdir` / `contextDir` / `approval` / `agent_session` 璇箟鐨勪汉
+- 鎯冲弬鑰冩帹鑽愭ā寮忓拰閬垮厤甯歌鍧戠殑浜?
 
-本文描述的是当前仓库已经实现并校验支持的能力，不包含未来设计草案。
+鏈枃鎻忚堪鐨勬槸褰撳墠浠撳簱宸茬粡瀹炵幇骞舵牎楠屾敮鎸佺殑鑳藉姏锛屼笉鍖呭惈鏈潵璁捐鑽夋銆?
 
-## 1. 文件格式
+## 1. 鏂囦欢鏍煎紡
 
-FlowBraid 支持：
+FlowBraid 鏀寔锛?
 
-- YAML：`.yaml` / `.yml`
-- JSON：`.json`
+- YAML锛歚.yaml` / `.yml`
+- JSON锛歚.json`
 
-建议优先使用 YAML，因为：
+寤鸿浼樺厛浣跨敤 YAML锛屽洜涓猴細
 
-- 可读性更高
-- 多行 `prompt` / `command` 更容易写
-- 更适合人工维护
+- 鍙鎬ф洿楂?
+- 澶氳 `prompt` / `command` 鏇村鏄撳啓
+- 鏇撮€傚悎浜哄伐缁存姢
 
-## 2. 最小工作流
+## 2. 鏈€灏忓伐浣滄祦
 
-最小可运行示例：
+鏈€灏忓彲杩愯绀轰緥锛?
 
 ```yaml
 id: hello-demo
@@ -41,15 +41,15 @@ nodes:
     message: finished
 ```
 
-运行：
+杩愯锛?
 
 ```bash
 flowbraid run path/to/workflow.yaml
 ```
 
-## 3. 顶层字段
+## 3. 椤跺眰瀛楁
 
-顶层结构：
+椤跺眰缁撴瀯锛?
 
 ```yaml
 id: your-workflow-id
@@ -60,47 +60,47 @@ nodes:
   ...
 ```
 
-字段说明：
+瀛楁璇存槑锛?
 
 - `id`
-  - 必填
-  - 工作流唯一标识
-  - 必须是非空字符串
+  - 蹇呭～
+  - 宸ヤ綔娴佸敮涓€鏍囪瘑
+  - 蹇呴』鏄潪绌哄瓧绗︿覆
 
 - `start`
-  - 必填
-  - 起始节点 id
-  - 必须引用 `nodes` 中已存在的节点
+  - 蹇呭～
+  - 璧峰鑺傜偣 id
+  - 蹇呴』寮曠敤 `nodes` 涓凡瀛樺湪鐨勮妭鐐?
 
 - `workdir`
-  - 可选
-  - workflow 级默认业务目录
-  - 供 `shell`、`codex`、`agent_session` 节点继承
-  - 为空字符串会校验失败
+  - 鍙€?
+  - workflow 绾ч粯璁や笟鍔＄洰褰?
+  - 渚?`shell`銆乣codex`銆乣agent_session` 鑺傜偣缁ф壙
+  - 涓虹┖瀛楃涓蹭細鏍￠獙澶辫触
 
 - `contextDir`
-  - 可选
-  - workflow 级默认上下文目录
-  - 供 `shell`、`codex`、`agent_session` 节点继承
-  - 为空字符串会校验失败
+  - 鍙€?
+  - workflow 绾ч粯璁や笂涓嬫枃鐩綍
+  - 渚?`shell`銆乣codex`銆乣agent_session` 鑺傜偣缁ф壙
+  - 涓虹┖瀛楃涓蹭細鏍￠獙澶辫触
 
 - `nodes`
-  - 必填
-  - 节点字典，key 就是节点 id
-  - 不能为空
+  - 蹇呭～
+  - 鑺傜偣瀛楀吀锛宬ey 灏辨槸鑺傜偣 id
+  - 涓嶈兘涓虹┖
 
-## 4. 节点通用字段
+## 4. 鑺傜偣閫氱敤瀛楁
 
-所有节点都支持以下通用字段：
+鎵€鏈夎妭鐐归兘鏀寔浠ヤ笅閫氱敤瀛楁锛?
 
 - `id`
-  - 可选
-  - 如果写了，必须和节点 key 完全一致
-  - 一般不推荐写，直接使用节点 key 即可
+  - 鍙€?
+  - 濡傛灉鍐欎簡锛屽繀椤诲拰鑺傜偣 key 瀹屽叏涓€鑷?
+  - 涓€鑸笉鎺ㄨ崘鍐欙紝鐩存帴浣跨敤鑺傜偣 key 鍗冲彲
 
 - `type`
-  - 必填
-  - 当前支持：
+  - 蹇呭～
+  - 褰撳墠鏀寔锛?
     - `shell`
     - `codex`
     - `agent_session`
@@ -109,72 +109,72 @@ nodes:
     - `end`
 
 - `title`
-  - 可选
-  - 当前主要作为描述字段，不参与调度
+  - 鍙€?
+  - 褰撳墠涓昏浣滀负鎻忚堪瀛楁锛屼笉鍙備笌璋冨害
 
 - `next`
-  - 可选
-  - 默认下一跳
-  - 常用于单一成功路径
+  - 鍙€?
+  - 榛樿涓嬩竴璺?
+  - 甯哥敤浜庡崟涓€鎴愬姛璺緞
 
 - `transitions`
-  - 可选
-  - 显式声明分支跳转
-  - 支持的 key：
+  - 鍙€?
+  - 鏄惧紡澹版槑鍒嗘敮璺宠浆
+  - 鏀寔鐨?key锛?
     - `success`
     - `failure`
     - `default`
     - `approve`
     - `reject`
 
-推荐规则：
+鎺ㄨ崘瑙勫垯锛?
 
-- 只有一个正常后继时，用 `next`
-- 有成功/失败分支时，用 `transitions.success` / `transitions.failure`
-- `approval` 必须用 `transitions.approve` / `transitions.reject`
+- 鍙湁涓€涓甯稿悗缁ф椂锛岀敤 `next`
+- 鏈夋垚鍔?澶辫触鍒嗘敮鏃讹紝鐢?`transitions.success` / `transitions.failure`
+- `approval` 蹇呴』鐢?`transitions.approve` / `transitions.reject`
 
-## 5. 目录模型
+## 5. 鐩綍妯″瀷
 
-FlowBraid 里有三个容易混淆的目录概念：
+FlowBraid 閲屾湁涓変釜瀹规槗娣锋穯鐨勭洰褰曟蹇碉細
 
 - `run workspace`
-  - FlowBraid 运行时目录
-  - 用于保存状态、消息、日志和节点产物
-  - 默认落在 workflow 文件所在目录下的 `.flowbraid-runs/`
+  - FlowBraid 杩愯鏃剁洰褰?
+  - 鐢ㄤ簬淇濆瓨鐘舵€併€佹秷鎭€佹棩蹇楀拰鑺傜偣浜х墿
+  - 榛樿钀藉湪 workflow 鏂囦欢鎵€鍦ㄧ洰褰曚笅鐨?`.flowbraid-runs/`
 
 - `contextDir`
-  - 节点终端默认打开的目录
-  - 用于放 `AGENTS.md`、角色说明、局部约束
-  - 更像“身份目录”或“角色目录”
+  - 鑺傜偣缁堢榛樿鎵撳紑鐨勭洰褰?
+  - 鐢ㄤ簬鏀?`AGENTS.md`銆佽鑹茶鏄庛€佸眬閮ㄧ害鏉?
+  - 鏇村儚鈥滆韩浠界洰褰曗€濇垨鈥滆鑹茬洰褰曗€?
 
 - `workdir`
-  - 节点真实修改和验证业务文件的目录
-  - 多个节点可以共享同一个 `workdir`
-  - 更像“真实业务工作区”
+  - 鑺傜偣鐪熷疄淇敼鍜岄獙璇佷笟鍔℃枃浠剁殑鐩綍
+  - 澶氫釜鑺傜偣鍙互鍏变韩鍚屼竴涓?`workdir`
+  - 鏇村儚鈥滅湡瀹炰笟鍔″伐浣滃尯鈥?
 
-当前实现中的默认规则：
+褰撳墠瀹炵幇涓殑榛樿瑙勫垯锛?
 
-- 节点 `workdir` 优先级：
-  - 节点级 `workdir`
-  - workflow 级 `workdir`
+- 鑺傜偣 `workdir` 浼樺厛绾э細
+  - 鑺傜偣绾?`workdir`
+  - workflow 绾?`workdir`
   - CLI `--workdir`
-  - workflow 文件所在目录
+  - workflow 鏂囦欢鎵€鍦ㄧ洰褰?
 
-- 节点 `contextDir` 优先级：
-  - 节点级 `contextDir`
-  - workflow 级 `contextDir`
-  - 当前节点最终解析出来的 `workdir`
+- 鑺傜偣 `contextDir` 浼樺厛绾э細
+  - 鑺傜偣绾?`contextDir`
+  - workflow 绾?`contextDir`
+  - 褰撳墠鑺傜偣鏈€缁堣В鏋愬嚭鏉ョ殑 `workdir`
 
-推荐用法：
+鎺ㄨ崘鐢ㄦ硶锛?
 
-- 开发/验收节点共享同一个 `workdir`
-- 开发节点使用自己的 `contextDir`
-- 验收节点使用自己的 `contextDir`
-- 不要把角色说明和真实业务文件混在一起
+- 寮€鍙?楠屾敹鑺傜偣鍏变韩鍚屼竴涓?`workdir`
+- 寮€鍙戣妭鐐逛娇鐢ㄨ嚜宸辩殑 `contextDir`
+- 楠屾敹鑺傜偣浣跨敤鑷繁鐨?`contextDir`
+- 涓嶈鎶婅鑹茶鏄庡拰鐪熷疄涓氬姟鏂囦欢娣峰湪涓€璧?
 
-## 6. `shell` 节点
+## 6. `shell` 鑺傜偣
 
-示例：
+绀轰緥锛?
 
 ```yaml
 prepare:
@@ -185,34 +185,34 @@ prepare:
   next: develop
 ```
 
-字段：
+瀛楁锛?
 
 - `type: shell`
 - `command`
-  - 必填
-  - 非空字符串
+  - 蹇呭～
+  - 闈炵┖瀛楃涓?
 - `cwd`
-  - 可选
-  - 用于覆盖 shell 进程当前目录
-  - 如果未写，默认使用该节点的 `contextDir`
+  - 鍙€?
+  - 鐢ㄤ簬瑕嗙洊 shell 杩涚▼褰撳墠鐩綍
+  - 濡傛灉鏈啓锛岄粯璁や娇鐢ㄨ鑺傜偣鐨?`contextDir`
 - `workdir`
-  - 可选
+  - 鍙€?
 - `contextDir`
-  - 可选
+  - 鍙€?
 
-运行语义：
+杩愯璇箟锛?
 
-- 命令退出码为 `0` 时视为成功
-- 非 `0` 时视为失败
-- 如果配置了 `transitions.failure`，会进入失败分支
-- 否则整个 run 失败
+- 鍛戒护閫€鍑虹爜涓?`0` 鏃惰涓烘垚鍔?
+- 闈?`0` 鏃惰涓哄け璐?
+- 濡傛灉閰嶇疆浜?`transitions.failure`锛屼細杩涘叆澶辫触鍒嗘敮
+- 鍚﹀垯鏁翠釜 run 澶辫触
 
-推荐用法：
+鎺ㄨ崘鐢ㄦ硶锛?
 
-- 用于准备环境、清理目录、执行一次性脚本
-- 多行命令优先用 YAML 块字符串
+- 鐢ㄤ簬鍑嗗鐜銆佹竻鐞嗙洰褰曘€佹墽琛屼竴娆℃€ц剼鏈?
+- 澶氳鍛戒护浼樺厛鐢?YAML 鍧楀瓧绗︿覆
 
-示例：
+绀轰緥锛?
 
 ```yaml
 command: |
@@ -221,9 +221,9 @@ command: |
   "
 ```
 
-## 7. `codex` 节点
+## 7. `codex` 鑺傜偣
 
-示例：
+绀轰緥锛?
 
 ```yaml
 develop:
@@ -239,57 +239,94 @@ develop:
     failure: verify
 ```
 
-字段：
+瀛楁锛?
 
 - `type: codex`
 - `mode`
-  - 必填
-  - 只能是：
+  - 蹇呭～
+  - 鍙兘鏄細
     - `exec`
     - `review`
 - `prompt`
-  - 必填
-  - 非空字符串
+  - 蹇呭～
+  - 闈炵┖瀛楃涓?
 - `cwd`
-  - 可选
-  - 默认使用该节点的 `contextDir`
+  - 鍙€?
+  - 榛樿浣跨敤璇ヨ妭鐐圭殑 `contextDir`
 - `workdir`
-  - 可选
+  - 鍙€?
 - `contextDir`
-  - 可选
-- `model`
-  - 可选
-  - 传给 `codex` CLI
-- `outputFile`
-  - 可选
-  - 节点产物文件名
-  - 默认是 `codex-last-message.md`
+  - 鍙€?
 
-运行语义：
+### `reentry`
+
+`codex` 节点支持可选的 `reentry` 配置，用于控制同一次 workflow run 内再次进入该节点时，FlowBraid 应该如何打开终端。
+
+```yaml
+develop:
+  type: codex
+  mode: exec
+  prompt: |
+    Implement the task.
+  reentry:
+    mode: resume
+```
+
+支持的取值：
+
+- `resume`
+  - 默认值
+  - 如果该节点上一轮已经记录了 `sessionId`，则使用 `codex resume <sessionId>` 恢复原会话
+  - 如果当前没有可恢复的 `sessionId`，会退化为 `new_with_history`
+
+- `new_with_history`
+  - 新开会话
+  - 但会把最新验证结果、人工反馈和工作流回流上下文作为提示词补给新会话
+
+- `new`
+  - 新开会话
+  - 不主动拼接上一轮验证/反馈历史，只保留当前轮必要的工作流引导和协议说明
+
+补充说明：
+
+- `reentry` 当前只对 `codex` 节点生效
+- `agent_session` 节点本身就是长期会话模型，不使用这个字段
+- native split 模式下，主进程会在节点启动后主动探测并记录该节点自己的 `sessionId`
+- 记录位置包括：
+  - `nodes/<node-id>/state/native-session.json`
+  - `nodes/<node-id>/status.json`- `model`
+  - 鍙€?
+  - 浼犵粰 `codex` CLI
+- `outputFile`
+  - 鍙€?
+  - 鑺傜偣浜х墿鏂囦欢鍚?
+  - 榛樿鏄?`codex-last-message.md`
+
+杩愯璇箟锛?
 
 - `mode: exec`
-  - 用于开发、修改、生成、执行一次性任务
+  - 鐢ㄤ簬寮€鍙戙€佷慨鏀广€佺敓鎴愩€佹墽琛屼竴娆℃€т换鍔?
 - `mode: review`
-  - 用于验收和审查
-  - 结果不仅依赖 CLI 是否成功退出，还依赖输出中是否包含：
+  - 鐢ㄤ簬楠屾敹鍜屽鏌?
+  - 缁撴灉涓嶄粎渚濊禆 CLI 鏄惁鎴愬姛閫€鍑猴紝杩樹緷璧栬緭鍑轰腑鏄惁鍖呭惈锛?
     - `verdict: approve`
     - `verdict: reject`
 
-当前推荐规则：
+褰撳墠鎺ㄨ崘瑙勫垯锛?
 
-- 开发节点用 `mode: exec`
-- 验收节点用 `mode: review`
-- `review` 节点的 `prompt` 里明确要求输出 `verdict: approve|reject`
-- `review reject` 时配 `transitions.failure` 回流到开发节点
+- 寮€鍙戣妭鐐圭敤 `mode: exec`
+- 楠屾敹鑺傜偣鐢?`mode: review`
+- `review` 鑺傜偣鐨?`prompt` 閲屾槑纭姹傝緭鍑?`verdict: approve|reject`
+- `review reject` 鏃堕厤 `transitions.failure` 鍥炴祦鍒板紑鍙戣妭鐐?
 
-重要说明：
+閲嶈璇存槑锛?
 
-- 当前实现里，`codex` 标准模式、split-terminal 模式、native-split 模式都遵循同一套 success/failure 跳转语义
-- `codex` 节点失败时，如果声明了 `transitions.failure`，会继续走失败分支
+- 褰撳墠瀹炵幇閲岋紝`codex` 鏍囧噯妯″紡銆乻plit-terminal 妯″紡銆乶ative-split 妯″紡閮介伒寰悓涓€濂?success/failure 璺宠浆璇箟
+- `codex` 鑺傜偣澶辫触鏃讹紝濡傛灉澹版槑浜?`transitions.failure`锛屼細缁х画璧板け璐ュ垎鏀?
 
-## 8. `agent_session` 节点
+## 8. `agent_session` 鑺傜偣
 
-示例：
+绀轰緥锛?
 
 ```yaml
 discuss:
@@ -303,57 +340,57 @@ discuss:
   next: done
 ```
 
-字段：
+瀛楁锛?
 
 - `type: agent_session`
 - `provider`
-  - 必填
-  - 当前只支持 `codex`
+  - 蹇呭～
+  - 褰撳墠鍙敮鎸?`codex`
 - `prompt`
-  - 必填
-  - 非空字符串
+  - 蹇呭～
+  - 闈炵┖瀛楃涓?
 - `cwd`
-  - 可选
+  - 鍙€?
 - `workdir`
-  - 可选
+  - 鍙€?
 - `contextDir`
-  - 可选
+  - 鍙€?
 - `model`
-  - 可选
+  - 鍙€?
 - `outputFile`
-  - 可选
+  - 鍙€?
 
-运行语义：
+杩愯璇箟锛?
 
-- 这是长期交互节点，不是一次性执行节点
-- provider 每次只做一轮 turn
-- provider 返回三种结构化状态之一：
+- 杩欐槸闀挎湡浜や簰鑺傜偣锛屼笉鏄竴娆℃€ф墽琛岃妭鐐?
+- provider 姣忔鍙仛涓€杞?turn
+- provider 杩斿洖涓夌缁撴瀯鍖栫姸鎬佷箣涓€锛?
   - `waiting_input`
   - `completed`
   - `failed`
 
-对应行为：
+瀵瑰簲琛屼负锛?
 
 - `waiting_input`
-  - 当前 run 进入 `paused`
-  - 必须通过 `flowbraid send <run-dir> <message>` 继续
-  - 不使用 `resume`
+  - 褰撳墠 run 杩涘叆 `paused`
+  - 蹇呴』閫氳繃 `flowbraid send <run-dir> <message>` 缁х画
+  - 涓嶄娇鐢?`resume`
 
 - `completed`
-  - 节点成功，继续下一跳
+  - 鑺傜偣鎴愬姛锛岀户缁笅涓€璺?
 
 - `failed`
-  - 节点失败
-  - 如果配置了 `transitions.failure`，进入失败分支
+  - 鑺傜偣澶辫触
+  - 濡傛灉閰嶇疆浜?`transitions.failure`锛岃繘鍏ュけ璐ュ垎鏀?
 
-推荐用法：
+鎺ㄨ崘鐢ㄦ硶锛?
 
-- 用于需求澄清、长期会话、逐轮交互任务
-- 不要把一次性开发任务强行写成 `agent_session`
+- 鐢ㄤ簬闇€姹傛緞娓呫€侀暱鏈熶細璇濄€侀€愯疆浜や簰浠诲姟
+- 涓嶈鎶婁竴娆℃€у紑鍙戜换鍔″己琛屽啓鎴?`agent_session`
 
-## 9. `gate` 节点
+## 9. `gate` 鑺傜偣
 
-示例：
+绀轰緥锛?
 
 ```yaml
 checkpoint:
@@ -363,29 +400,29 @@ checkpoint:
   next: next-step
 ```
 
-字段：
+瀛楁锛?
 
 - `type: gate`
 - `prompt`
-  - 可选
+  - 鍙€?
 
-运行语义：
+杩愯璇箟锛?
 
-- 进入该节点后，run 会暂停
-- 通过 `flowbraid resume <run-dir>` 继续
-- 继续后流向：
+- 杩涘叆璇ヨ妭鐐瑰悗锛宺un 浼氭殏鍋?
+- 閫氳繃 `flowbraid resume <run-dir>` 缁х画
+- 缁х画鍚庢祦鍚戯細
   - `transitions.default`
-  - 否则 `next`
+  - 鍚﹀垯 `next`
 
-适合场景：
+閫傚悎鍦烘櫙锛?
 
-- 人工确认
-- 手动检查
-- 外部条件等待
+- 浜哄伐纭
+- 鎵嬪姩妫€鏌?
+- 澶栭儴鏉′欢绛夊緟
 
-## 10. `approval` 节点
+## 10. `approval` 鑺傜偣
 
-示例：
+绀轰緥锛?
 
 ```yaml
 approve:
@@ -397,31 +434,31 @@ approve:
     reject: develop
 ```
 
-字段：
+瀛楁锛?
 
 - `type: approval`
 - `prompt`
-  - 可选
+  - 鍙€?
 - `transitions.approve`
-  - 必填
+  - 蹇呭～
 - `transitions.reject`
-  - 必填
+  - 蹇呭～
 
-运行语义：
+杩愯璇箟锛?
 
-- 进入该节点后，run 会暂停
-- 必须通过 `flowbraid resume <run-dir> --decision approve|reject` 继续
-- 如果 `reject`，当前实现要求提供 comment
-- 人工反馈会被记录到 `messages/human-feedback.jsonl`
+- 杩涘叆璇ヨ妭鐐瑰悗锛宺un 浼氭殏鍋?
+- 蹇呴』閫氳繃 `flowbraid resume <run-dir> --decision approve|reject` 缁х画
+- 濡傛灉 `reject`锛屽綋鍓嶅疄鐜拌姹傛彁渚?comment
+- 浜哄伐鍙嶉浼氳璁板綍鍒?`messages/human-feedback.jsonl`
 
-推荐用法：
+鎺ㄨ崘鐢ㄦ硶锛?
 
-- 用于真正的人工审批
-- 如果只是“按回车继续”，请用 `gate`
+- 鐢ㄤ簬鐪熸鐨勪汉宸ュ鎵?
+- 濡傛灉鍙槸鈥滄寜鍥炶溅缁х画鈥濓紝璇风敤 `gate`
 
-## 11. `end` 节点
+## 11. `end` 鑺傜偣
 
-示例：
+绀轰緥锛?
 
 ```yaml
 done:
@@ -429,37 +466,37 @@ done:
   message: workflow completed
 ```
 
-字段：
+瀛楁锛?
 
 - `type: end`
 - `message`
-  - 可选
+  - 鍙€?
 
-运行语义：
+杩愯璇箟锛?
 
-- 到达后工作流结束
+- 鍒拌揪鍚庡伐浣滄祦缁撴潫
 
-## 12. 分支规则
+## 12. 鍒嗘敮瑙勫垯
 
-当前跳转优先级：
+褰撳墠璺宠浆浼樺厛绾э細
 
-普通节点：
+鏅€氳妭鐐癸細
 
-1. 如果根据结果命中了 `transitions.success` 或 `transitions.failure`，优先走对应分支
-2. 否则如果存在 `transitions.default`，走 `default`
-3. 否则如果存在 `next`，走 `next`
-4. 否则结束当前链路；若节点是失败态，则整个 run 失败
+1. 濡傛灉鏍规嵁缁撴灉鍛戒腑浜?`transitions.success` 鎴?`transitions.failure`锛屼紭鍏堣蛋瀵瑰簲鍒嗘敮
+2. 鍚﹀垯濡傛灉瀛樺湪 `transitions.default`锛岃蛋 `default`
+3. 鍚﹀垯濡傛灉瀛樺湪 `next`锛岃蛋 `next`
+4. 鍚﹀垯缁撴潫褰撳墠閾捐矾锛涜嫢鑺傜偣鏄け璐ユ€侊紝鍒欐暣涓?run 澶辫触
 
-`approval` 节点：
+`approval` 鑺傜偣锛?
 
-1. `approve` 走 `transitions.approve`
-2. `reject` 走 `transitions.reject`
+1. `approve` 璧?`transitions.approve`
+2. `reject` 璧?`transitions.reject`
 
-## 13. 推荐编排模式
+## 13. 鎺ㄨ崘缂栨帓妯″紡
 
-### 模式 A：准备 -> 开发 -> 验收 -> 人工审批 -> 结束
+### 妯″紡 A锛氬噯澶?-> 寮€鍙?-> 楠屾敹 -> 浜哄伐瀹℃壒 -> 缁撴潫
 
-这是最推荐的标准闭环：
+杩欐槸鏈€鎺ㄨ崘鐨勬爣鍑嗛棴鐜細
 
 ```yaml
 id: standard-loop
@@ -503,7 +540,7 @@ nodes:
     type: end
 ```
 
-### 模式 B：长期会话 -> 结束
+### 妯″紡 B锛氶暱鏈熶細璇?-> 缁撴潫
 
 ```yaml
 id: session-demo
@@ -520,200 +557,200 @@ nodes:
     type: end
 ```
 
-## 14. 常见错误
+## 14. 甯歌閿欒
 
-### 1. `start` 指向不存在节点
+### 1. `start` 鎸囧悜涓嶅瓨鍦ㄨ妭鐐?
 
-会直接校验失败。
+浼氱洿鎺ユ牎楠屽け璐ャ€?
 
-### 2. `approval` 缺少 `approve` 或 `reject`
+### 2. `approval` 缂哄皯 `approve` 鎴?`reject`
 
-会直接校验失败。
+浼氱洿鎺ユ牎楠屽け璐ャ€?
 
-### 3. `agent_session` 用 `resume`
+### 3. `agent_session` 鐢?`resume`
 
-这是错误用法。`agent_session` 应该用 `send`，不是 `resume`。
+杩欐槸閿欒鐢ㄦ硶銆俙agent_session` 搴旇鐢?`send`锛屼笉鏄?`resume`銆?
 
-### 4. `review` 节点不输出 `verdict:`
+### 4. `review` 鑺傜偣涓嶈緭鍑?`verdict:`
 
-当前实现会把它视为失败，不会当作成功通过。
+褰撳墠瀹炵幇浼氭妸瀹冭涓哄け璐ワ紝涓嶄細褰撲綔鎴愬姛閫氳繃銆?
 
-### 5. 把 `contextDir` 当作真实业务目录
+### 5. 鎶?`contextDir` 褰撲綔鐪熷疄涓氬姟鐩綍
 
-推荐只把它当角色目录。真实代码修改应该落在 `workdir`。
+鎺ㄨ崘鍙妸瀹冨綋瑙掕壊鐩綍銆傜湡瀹炰唬鐮佷慨鏀瑰簲璇ヨ惤鍦?`workdir`銆?
 
-### 6. 在单行 YAML 里硬塞复杂 shell 命令
+### 6. 鍦ㄥ崟琛?YAML 閲岀‖濉炲鏉?shell 鍛戒护
 
-复杂命令推荐使用块字符串。
+澶嶆潅鍛戒护鎺ㄨ崘浣跨敤鍧楀瓧绗︿覆銆?
 
-### 7. 没有失败分支却期望自动回流
+### 7. 娌℃湁澶辫触鍒嗘敮鍗存湡鏈涜嚜鍔ㄥ洖娴?
 
-当前只有显式配置了 `transitions.failure`，失败时才会继续分支流转。
+褰撳墠鍙湁鏄惧紡閰嶇疆浜?`transitions.failure`锛屽け璐ユ椂鎵嶄細缁х画鍒嗘敮娴佽浆銆?
 
-## 15. 推荐实践
+## 15. 鎺ㄨ崘瀹炶返
 
-- 每个节点只做一种职责
-- 开发和验收用不同 `contextDir`
-- 共享真实业务目录时统一放到 `workdir`
-- `review` 节点明确要求输出 `verdict:`
-- `approval reject` 的 prompt 明确要求人工给出具体意见
-- 对需要中途对话的节点使用 `agent_session`
-- 对一次性准备脚本使用 `shell`
+- 姣忎釜鑺傜偣鍙仛涓€绉嶈亴璐?
+- 寮€鍙戝拰楠屾敹鐢ㄤ笉鍚?`contextDir`
+- 鍏变韩鐪熷疄涓氬姟鐩綍鏃剁粺涓€鏀惧埌 `workdir`
+- `review` 鑺傜偣鏄庣‘瑕佹眰杈撳嚭 `verdict:`
+- `approval reject` 鐨?prompt 鏄庣‘瑕佹眰浜哄伐缁欏嚭鍏蜂綋鎰忚
+- 瀵归渶瑕佷腑閫斿璇濈殑鑺傜偣浣跨敤 `agent_session`
+- 瀵逛竴娆℃€у噯澶囪剼鏈娇鐢?`shell`
 
-## 16. 参考文件
+## 16. 鍙傝€冩枃浠?
 
-推荐从以下文件继续看：
+鎺ㄨ崘浠庝互涓嬫枃浠剁户缁湅锛?
 
-- 标准原生分离终端示例：[codex-native-split-demo.workflow.yaml](D:/Code/FlowBraid/examples/codex-native-split-demo.workflow.yaml:1)
-- PTY 交互示例：[codex-pty-demo.workflow.yaml](D:/Code/FlowBraid/examples/codex-pty-demo.workflow.yaml:1)
-- 长期会话示例：[agent-session-demo.workflow.yaml](D:/Code/FlowBraid/examples/agent-session-demo.workflow.yaml:1)
-- 需求与状态模型：[requirements.md](D:/Code/FlowBraid/doc/requirements.md:18)
-- 架构与运行流程：[architecture.md](D:/Code/FlowBraid/doc/architecture.md:31)
+- 鏍囧噯鍘熺敓鍒嗙缁堢绀轰緥锛歔codex-native-split-demo.workflow.yaml](D:/Code/FlowBraid/examples/codex-native-split-demo.workflow.yaml:1)
+- PTY 浜や簰绀轰緥锛歔codex-pty-demo.workflow.yaml](D:/Code/FlowBraid/examples/codex-pty-demo.workflow.yaml:1)
+- 闀挎湡浼氳瘽绀轰緥锛歔agent-session-demo.workflow.yaml](D:/Code/FlowBraid/examples/agent-session-demo.workflow.yaml:1)
+- 闇€姹備笌鐘舵€佹ā鍨嬶細[requirements.md](D:/Code/FlowBraid/doc/requirements.md:18)
+- 鏋舵瀯涓庤繍琛屾祦绋嬶細[architecture.md](D:/Code/FlowBraid/doc/architecture.md:31)
 
-## 17. 如何启动和运行工作流
+## 17. 濡備綍鍚姩鍜岃繍琛屽伐浣滄祦
 
-### 17.1 校验 workflow 文件
+### 17.1 鏍￠獙 workflow 鏂囦欢
 
-在正式运行前，建议先校验：
+鍦ㄦ寮忚繍琛屽墠锛屽缓璁厛鏍￠獙锛?
 
 ```bash
 flowbraid validate path/to/workflow.yaml
 ```
 
-校验通过时会输出：
+鏍￠獙閫氳繃鏃朵細杈撳嚭锛?
 
 ```text
-workflow 校验通过
+workflow 鏍￠獙閫氳繃
 ```
 
-适合用来提前发现：
+閫傚悎鐢ㄦ潵鎻愬墠鍙戠幇锛?
 
-- `start` 指向不存在节点
-- 节点 `type` 非法
-- `approval` 缺少 `approve` / `reject`
-- 跳转目标不存在
+- `start` 鎸囧悜涓嶅瓨鍦ㄨ妭鐐?
+- 鑺傜偣 `type` 闈炴硶
+- `approval` 缂哄皯 `approve` / `reject`
+- 璺宠浆鐩爣涓嶅瓨鍦?
 
-### 17.2 启动工作流
+### 17.2 鍚姩宸ヤ綔娴?
 
-基础命令：
+鍩虹鍛戒护锛?
 
 ```bash
 flowbraid run path/to/workflow.yaml
 ```
 
-常见参数：
+甯歌鍙傛暟锛?
 
 ```bash
 flowbraid run path/to/workflow.yaml --workspace <runs-dir> --workdir <dir> --codex-command <cmd>
 ```
 
-字段说明：
+瀛楁璇存槑锛?
 
 - `--workspace <dir>`
-  - 指定 run workspace 的根目录
-  - 默认是 workflow 文件所在目录下的 `.flowbraid-runs/`
+  - 鎸囧畾 run workspace 鐨勬牴鐩綍
+  - 榛樿鏄?workflow 鏂囦欢鎵€鍦ㄧ洰褰曚笅鐨?`.flowbraid-runs/`
 
 - `--workdir <dir>`
-  - 覆盖 workflow 默认 `workdir`
-  - 适合同一份 workflow 在不同业务目录中复用
+  - 瑕嗙洊 workflow 榛樿 `workdir`
+  - 閫傚悎鍚屼竴浠?workflow 鍦ㄤ笉鍚屼笟鍔＄洰褰曚腑澶嶇敤
 
 - `--codex-command <cmd>`
-  - 指定 `codex` 命令入口
-  - 例如本地包装脚本、测试桩或自定义启动命令
+  - 鎸囧畾 `codex` 鍛戒护鍏ュ彛
+  - 渚嬪鏈湴鍖呰鑴氭湰銆佹祴璇曟々鎴栬嚜瀹氫箟鍚姩鍛戒护
 
-### 17.3 交互模式与分离终端模式
+### 17.3 浜や簰妯″紡涓庡垎绂荤粓绔ā寮?
 
-如果当前终端是 TTY，`run` 默认会进入交互式运行。
+濡傛灉褰撳墠缁堢鏄?TTY锛宍run` 榛樿浼氳繘鍏ヤ氦浜掑紡杩愯銆?
 
-常见模式：
+甯歌妯″紡锛?
 
 ```bash
 flowbraid run path/to/workflow.yaml --interactive
 flowbraid run path/to/workflow.yaml --interactive
 ```
 
-说明：
+璇存槑锛?
 
 - `--interactive`
-  - 允许在当前终端中处理审批、门禁和会话继续输入
+  - 鍏佽鍦ㄥ綋鍓嶇粓绔腑澶勭悊瀹℃壒銆侀棬绂佸拰浼氳瘽缁х画杈撳叆
 
-  - `codex` 节点使用旧的 helper 包裹型分离终端模式
+  - `codex` 鑺傜偣浣跨敤鏃х殑 helper 鍖呰９鍨嬪垎绂荤粓绔ā寮?
 
 - ???????????????native split?
-  - `codex` 节点使用原生 `codex` 分离终端模式
-  - 主进程继续留在当前终端输出流程日志
-  - 每个 `codex` 节点在独立窗口中运行
+  - `codex` 鑺傜偣浣跨敤鍘熺敓 `codex` 鍒嗙缁堢妯″紡
+  - 涓昏繘绋嬬户缁暀鍦ㄥ綋鍓嶇粓绔緭鍑烘祦绋嬫棩蹇?
+  - 姣忎釜 `codex` 鑺傜偣鍦ㄧ嫭绔嬬獥鍙ｄ腑杩愯
 
-### 17.4 非交互模式
+### 17.4 闈炰氦浜掓ā寮?
 
-如果你在脚本或 CI 中运行，或者明确不想进入交互模式，可以关闭：
+濡傛灉浣犲湪鑴氭湰鎴?CI 涓繍琛岋紝鎴栬€呮槑纭笉鎯宠繘鍏ヤ氦浜掓ā寮忥紝鍙互鍏抽棴锛?
 
 ```bash
 flowbraid run path/to/workflow.yaml --no-interactive
 ```
 
-此时如果流程停在：
+姝ゆ椂濡傛灉娴佺▼鍋滃湪锛?
 
 - `gate`
 - `approval`
-- `agent_session` 的 `waiting_input`
+- `agent_session` 鐨?`waiting_input`
 
-就需要后续通过 `resume` 或 `send` 手动继续。
+灏遍渶瑕佸悗缁€氳繃 `resume` 鎴?`send` 鎵嬪姩缁х画銆?
 
-## 18. 如何继续、控制和恢复工作流
+## 18. 濡備綍缁х画銆佹帶鍒跺拰鎭㈠宸ヤ綔娴?
 
 ### 18.1 `resume`
 
-用于继续：
+鐢ㄤ簬缁х画锛?
 
 - `gate`
 - `approval`
 
-命令：
+鍛戒护锛?
 
 ```bash
 flowbraid resume <run-dir>
 flowbraid resume <run-dir> --decision approve
-flowbraid resume <run-dir> --decision reject --message "具体打回意见"
+flowbraid resume <run-dir> --decision reject --message "鍏蜂綋鎵撳洖鎰忚"
 ```
 
-说明：
+璇存槑锛?
 
-- `gate` 节点只需要 `resume`
-- `approval` 节点必须给出 `approve` 或 `reject`
-- `reject` 时必须带 `--message`
+- `gate` 鑺傜偣鍙渶瑕?`resume`
+- `approval` 鑺傜偣蹇呴』缁欏嚭 `approve` 鎴?`reject`
+- `reject` 鏃跺繀椤诲甫 `--message`
 
 ### 18.2 `send`
 
-用于继续：
+鐢ㄤ簬缁х画锛?
 
 - `agent_session`
 
-命令：
+鍛戒护锛?
 
 ```bash
-flowbraid send <run-dir> "继续消息"
+flowbraid send <run-dir> "缁х画娑堟伅"
 ```
 
-说明：
+璇存槑锛?
 
-- `agent_session` 不使用 `resume`
-- `send` 会把消息写入当前会话节点的 `inbox.jsonl`
-- provider 会基于完整会话历史继续下一轮 turn
+- `agent_session` 涓嶄娇鐢?`resume`
+- `send` 浼氭妸娑堟伅鍐欏叆褰撳墠浼氳瘽鑺傜偣鐨?`inbox.jsonl`
+- provider 浼氬熀浜庡畬鏁翠細璇濆巻鍙茬户缁笅涓€杞?turn
 
-### 18.3 中断运行
+### 18.3 涓柇杩愯
 
-运行中按 `Ctrl+C`：
+杩愯涓寜 `Ctrl+C`锛?
 
-- 第一次：请求主进程终止当前运行，并尽量把失败状态落盘
-- 连续再次按：直接强制退出当前 CLI 进程
+- 绗竴娆★細璇锋眰涓昏繘绋嬬粓姝㈠綋鍓嶈繍琛岋紝骞跺敖閲忔妸澶辫触鐘舵€佽惤鐩?
+- 杩炵画鍐嶆鎸夛細鐩存帴寮哄埗閫€鍑哄綋鍓?CLI 杩涚▼
 
-建议：
+寤鸿锛?
 
-- 如果已经拿到 `run-dir`，优先查看状态文件确认中断点
-- 不要假设所有外部子进程都会瞬时退出
+- 濡傛灉宸茬粡鎷垮埌 `run-dir`锛屼紭鍏堟煡鐪嬬姸鎬佹枃浠剁‘璁や腑鏂偣
+- 涓嶈鍋囪鎵€鏈夊閮ㄥ瓙杩涚▼閮戒細鐬椂閫€鍑?
 
-## 19. 常用命令速查
+## 19. 甯哥敤鍛戒护閫熸煡
 
 ```bash
 flowbraid validate path/to/workflow.yaml
@@ -722,13 +759,13 @@ flowbraid run path/to/workflow.yaml --interactive
 flowbraid run path/to/workflow.yaml --interactive
 flowbraid resume <run-dir>
 flowbraid resume <run-dir> --decision approve
-flowbraid resume <run-dir> --decision reject --message "请补充错误处理"
-flowbraid send <run-dir> "请继续实现导出功能"
+flowbraid resume <run-dir> --decision reject --message "璇疯ˉ鍏呴敊璇鐞?
+flowbraid send <run-dir> "璇风户缁疄鐜板鍑哄姛鑳?
 ```
 
-## 20. 如何理解运行输出
+## 20. 濡備綍鐞嗚В杩愯杈撳嚭
 
-主进程常见输出示例：
+涓昏繘绋嬪父瑙佽緭鍑虹ず渚嬶細
 
 ```text
 [run] started 20260506-123456-abcdef
@@ -741,78 +778,80 @@ run 20260506-123456-abcdef => paused
 workspace: D:\Code\FlowBraid\examples\.flowbraid-runs\20260506-123456-abcdef
 ```
 
-常见前缀含义：
+甯歌鍓嶇紑鍚箟锛?
 
 - `[run]`
-  - 调度器级别日志
-  - 表示 run 状态变化、节点进入、节点流转
+  - 璋冨害鍣ㄧ骇鍒棩蹇?
+  - 琛ㄧず run 鐘舵€佸彉鍖栥€佽妭鐐硅繘鍏ャ€佽妭鐐规祦杞?
 
 - `[<node-id>]`
-  - 来自具体节点执行过程的日志
-  - 例如 `shell` 输出、`codex` 输出、provider 输出
+  - 鏉ヨ嚜鍏蜂綋鑺傜偣鎵ц杩囩▼鐨勬棩蹇?
+  - 渚嬪 `shell` 杈撳嚭銆乣codex` 杈撳嚭銆乸rovider 杈撳嚭
 
 - `[native]`
-  - 原生分离终端模式下的节点窗口启动、会话恢复、终端关闭等日志
+  - 鍘熺敓鍒嗙缁堢妯″紡涓嬬殑鑺傜偣绐楀彛鍚姩銆佷細璇濇仮澶嶃€佺粓绔叧闂瓑鏃ュ織
 
-常见状态解释：
+甯歌鐘舵€佽В閲婏細
 
 - `started`
-  - run 已创建并开始执行
+  - run 宸插垱寤哄苟寮€濮嬫墽琛?
 
 - `workspace <dir>`
-  - 本次 run 的运行目录
-  - 后续 `resume` / `send` 都基于这个目录
+  - 鏈 run 鐨勮繍琛岀洰褰?
+  - 鍚庣画 `resume` / `send` 閮藉熀浜庤繖涓洰褰?
 
 - `step N: enter node ...`
-  - 调度器进入第 N 步
+  - 璋冨害鍣ㄨ繘鍏ョ N 姝?
 
 - `node ... succeeded`
-  - 节点成功结束
+  - 鑺傜偣鎴愬姛缁撴潫
 
 - `node ... failed`
-  - 节点失败
-  - 如果日志里还有 `route to ...`，说明失败后进入了 `transitions.failure`
+  - 鑺傜偣澶辫触
+  - 濡傛灉鏃ュ織閲岃繕鏈?`route to ...`锛岃鏄庡け璐ュ悗杩涘叆浜?`transitions.failure`
 
 - `paused at ...`
-  - 流程暂停
-  - 需要你手动继续
+  - 娴佺▼鏆傚仠
+  - 闇€瑕佷綘鎵嬪姩缁х画
 
 - `run ... => completed`
-  - 整个工作流完成
+  - 鏁翠釜宸ヤ綔娴佸畬鎴?
 
 - `run ... => failed`
-  - 整个工作流失败
+  - 鏁翠釜宸ヤ綔娴佸け璐?
 
-## 21. 如何查看运行产物和状态
+## 21. 濡備綍鏌ョ湅杩愯浜х墿鍜岀姸鎬?
 
-每次运行都会创建独立 run 目录。
+姣忔杩愯閮戒細鍒涘缓鐙珛 run 鐩綍銆?
 
-关键文件：
+鍏抽敭鏂囦欢锛?
 
 - `state/run.json`
-  - run 总状态
+  - run 鎬荤姸鎬?
 
 - `nodes/<node-id>/status.json`
-  - 单节点状态
+  - 鍗曡妭鐐圭姸鎬?
 
 - `messages/events.jsonl`
-  - 全局事件流
+  - 鍏ㄥ眬浜嬩欢娴?
 
 - `messages/human-feedback.jsonl`
-  - 审批 reject / approve 反馈
+  - 瀹℃壒 reject / approve 鍙嶉
 
 - `nodes/<node-id>/artifacts/`
-  - 节点输出产物
+  - 鑺傜偣杈撳嚭浜х墿
 
 - `nodes/<node-id>/messages/inbox.jsonl`
-  - 会话型节点输入
+  - 浼氳瘽鍨嬭妭鐐硅緭鍏?
 
 - `nodes/<node-id>/messages/outbox.jsonl`
-  - 会话型节点输出
+  - 浼氳瘽鍨嬭妭鐐硅緭鍑?
 
-定位思路：
+瀹氫綅鎬濊矾锛?
 
-- 想知道 run 停在哪：看 `state/run.json`
-- 想知道某节点为什么失败：看 `nodes/<node-id>/status.json`
-- 想知道审批给了什么意见：看 `messages/human-feedback.jsonl`
-- 想知道 review 为什么 reject：看对应 `artifacts/*.md`
+- 鎯崇煡閬?run 鍋滃湪鍝細鐪?`state/run.json`
+- 鎯崇煡閬撴煇鑺傜偣涓轰粈涔堝け璐ワ細鐪?`nodes/<node-id>/status.json`
+- 鎯崇煡閬撳鎵圭粰浜嗕粈涔堟剰瑙侊細鐪?`messages/human-feedback.jsonl`
+- 鎯崇煡閬?review 涓轰粈涔?reject锛氱湅瀵瑰簲 `artifacts/*.md`
+
+

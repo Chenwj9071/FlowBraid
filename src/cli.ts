@@ -4,10 +4,10 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { loadWorkflowFile, WorkflowError } from './workflow.js';
-import { loadManifest, loadRunState, persistRunState } from './workspace.js';
+import { loadManifest, loadRunState, loadRunTimeline, persistRunState } from './workspace.js';
 import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
 import { RunInterruptedError } from './errors.js';
-import { appendText, nowIso } from './utils.js';
+import { appendText, nowIso, readJson } from './utils.js';
 import { resetTerminalForPrompt } from './terminal.js';
 import { parseArgs } from './cli-args.js';
 import { buildRunnerOptionsFromFlags } from './runtime-options.js';
@@ -18,17 +18,28 @@ import {
   updateNativeSessionState,
   writeNativeSessionState,
 } from './native-session.js';
-import type { NativeSessionResult, NativeSessionState } from './types.js';
+import type { NativeSessionResult, NativeSessionState, NodeState, RunTimelineEntry } from './types.js';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
 
 Usage:
-  flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive]
+  flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive] [--pty]
   flowbraid resume <run-dir> [--decision approve|reject] [--message <text>] [--codex-command <cmd>]
   flowbraid send <run-dir> <message> [--codex-command <cmd>]
+  flowbraid status <run-dir> [--json]
   flowbraid node <start|complete|fail|pause|artifact|heartbeat> --run-dir <dir> --node-id <id> [...]
   flowbraid validate <workflow-file>`);
+}
+
+export function resolveNativeSplitPreference(
+  flags: Record<string, string | boolean>,
+  shouldInteractive: boolean,
+): boolean {
+  if (!shouldInteractive) {
+    return false;
+  }
+  return flags.pty !== true;
 }
 
 function resolveCodexCommand(flags: Record<string, string | boolean>): string | undefined {
@@ -41,21 +52,18 @@ function resolveCodexCommand(flags: Record<string, string | boolean>): string | 
   return undefined;
 }
 
-async function promptApprovalDecision(
-  runDir: string,
-  abortSignal?: AbortSignal,
-): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
+async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
   resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const { workspace, manifest } = await loadManifest(runDir);
   const state = await loadRunState(workspace);
   const currentNodeId = state.currentNodeId;
   if (state.status !== 'paused' || !currentNodeId) {
-    throw new Error('当前 run 不是 paused 状态，无法发起审批');
+    throw new Error('run is not paused; approval prompt is unavailable');
   }
 
   const currentNode = manifest.workflow.nodes[currentNodeId];
   if (currentNode?.type !== 'approval') {
-    throw new Error('当前暂停节点不是 approval，不能使用交互式审批');
+    throw new Error('current paused node is not approval');
   }
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -98,11 +106,11 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
       console.log(promptText);
     }
     const answer = await Promise.race([
-      rl.question('按回车继续，输入 q 退出: '),
+      rl.question('press Enter to continue, or q to quit: '),
       createAbortPromise(abortSignal, () => rl.close()),
     ]);
     if (answer.trim().toLowerCase() === 'q') {
-      throw new Error('用户取消继续执行');
+      throw new Error('user canceled continuation');
     }
   } finally {
     rl.close();
@@ -161,7 +169,7 @@ async function runInteractiveWorkflow(
     const currentNode = currentNodeId ? manifest.workflow.nodes[currentNodeId] : null;
 
     if (!currentNode) {
-      throw new Error(`无法识别当前暂停节点: ${String(currentNodeId)}`);
+      throw new Error(`cannot identify current paused node: ${String(currentNodeId)}`);
     }
 
     if (currentNode.type === 'approval') {
@@ -193,7 +201,7 @@ async function runInteractiveWorkflow(
     }
 
     if (currentNode.type === 'agent_session') {
-      console.log('agent_session 等待继续输入，输入 /exit 可暂时退出当前会话。');
+      console.log('agent_session is waiting for more input; use /exit to leave the conversation for now');
       const message = (await promptAgentSessionMessage(options.abortSignal)).trim();
       if (!message || message === '/exit') {
         console.log(`run ${result.runId} => ${result.status}`);
@@ -211,7 +219,7 @@ async function runInteractiveWorkflow(
       continue;
     }
 
-    throw new Error(`当前暂停节点不支持交互式继续: ${currentNode.type}`);
+    throw new Error(`interactive continuation is not supported for node type: ${currentNode.type}`);
   }
 
   console.log(`run ${result.runId} => ${result.status}`);
@@ -223,7 +231,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   const runDir = flags['run-dir'] ? path.resolve(String(flags['run-dir'])) : undefined;
   const nodeId = flags['node-id'] ? String(flags['node-id']) : undefined;
   if (!runDir || !nodeId) {
-    throw new Error('node 命令需要 --run-dir 和 --node-id');
+    throw new Error('node command requires --run-dir and --node-id');
   }
 
   const { workspace } = await loadManifest(runDir);
@@ -242,10 +250,12 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     case 'start': {
       const terminalPid = flags['terminal-pid'] ? Number(String(flags['terminal-pid'])) : undefined;
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
+      const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       const nextState: NativeSessionState = {
         ...baseState,
         mode: 'native_split_terminal',
         attemptId,
+        sessionId,
         status: 'running',
         terminalPid,
         startedAt: baseState.startedAt,
@@ -265,15 +275,15 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     case 'complete': {
       const summary = flags.summary ? String(flags.summary) : undefined;
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
-      await updateNativeSessionState(sessionPath, (current) =>
-        ({
-          ...buildNativeTerminalState(current ?? baseState, 'completed', {
-            kind: 'complete',
-            summary,
-          }),
-          attemptId,
+      const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
+      await updateNativeSessionState(sessionPath, (current) => ({
+        ...buildNativeTerminalState(current ?? baseState, 'completed', {
+          kind: 'complete',
+          summary,
         }),
-      );
+        attemptId,
+        sessionId,
+      }));
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.completed',
         nodeId,
@@ -287,8 +297,9 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     case 'fail': {
       const message = flags.message ? String(flags.message) : undefined;
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
+      const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       if (!message) {
-        throw new Error('node fail 需要 --message');
+        throw new Error('node fail requires --message');
       }
       await updateNativeSessionState(sessionPath, (current) => ({
         ...buildNativeTerminalState(current ?? baseState, 'failed', {
@@ -296,6 +307,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
           message,
         }),
         attemptId,
+        sessionId,
       }));
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.failed',
@@ -310,8 +322,9 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     case 'pause': {
       const reason = flags.reason ? String(flags.reason) : undefined;
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
+      const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       if (!reason) {
-        throw new Error('node pause 需要 --reason');
+        throw new Error('node pause requires --reason');
       }
       await updateNativeSessionState(sessionPath, (current) => ({
         ...buildNativeTerminalState(current ?? baseState, 'paused', {
@@ -319,6 +332,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
           reason,
         }),
         attemptId,
+        sessionId,
       }));
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.paused',
@@ -333,13 +347,15 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     case 'artifact': {
       const file = flags.file ? String(flags.file) : undefined;
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
+      const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       if (!file) {
-        throw new Error('node artifact 需要 --file');
+        throw new Error('node artifact requires --file');
       }
       await updateNativeSessionState(sessionPath, (current) => ({
         ...(current ?? baseState),
         mode: 'native_split_terminal',
         attemptId,
+        sessionId,
         updatedAt: nowIso(),
         lastArtifactPath: file,
       }));
@@ -355,12 +371,14 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'heartbeat': {
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
+      const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       await updateNativeSessionState(sessionPath, (current) => {
         const effectiveState = current ?? baseState;
         return {
           ...effectiveState,
           mode: 'native_split_terminal',
           attemptId,
+          sessionId,
           status: effectiveState.status === 'launching' ? 'running' : effectiveState.status,
           updatedAt: nowIso(),
           lastHeartbeatAt: nowIso(),
@@ -376,7 +394,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     }
 
     default:
-      throw new Error(`不支持的 node 子命令: ${String(subcommand)}`);
+      throw new Error(`unsupported node subcommand: ${String(subcommand)}`);
   }
 }
 
@@ -404,6 +422,85 @@ async function readNativeSessionSafely(sessionPath: string): Promise<NativeSessi
   }
 }
 
+interface StatusSnapshot {
+  runDir: string;
+  runId: string;
+  workflowId: string;
+  runStatus: string;
+  currentNodeId: string | null;
+  pendingNodeId: string | null;
+  currentAttemptId?: string | null;
+  reentryMode?: string;
+  nodeState?: NodeState | null;
+  nativeSession?: NativeSessionState | null;
+  latestTimeline?: RunTimelineEntry | null;
+}
+
+async function buildStatusSnapshot(runDir: string): Promise<StatusSnapshot> {
+  const resolvedRunDir = path.resolve(runDir);
+  const { workspace, manifest } = await loadManifest(resolvedRunDir);
+  const runState = await loadRunState(workspace);
+  const timeline = await loadRunTimeline(workspace);
+  const currentNodeId = runState.currentNodeId;
+  const currentNode = currentNodeId ? manifest.workflow.nodes[currentNodeId] : null;
+  const nodeDir = currentNodeId ? path.join(workspace.nodesDir, currentNodeId) : null;
+  let nodeState: NodeState | null = null;
+  let nativeSession: NativeSessionState | null = null;
+
+  if (nodeDir) {
+    try {
+      nodeState = await readJson<NodeState>(path.join(nodeDir, 'status.json'));
+    } catch {
+      nodeState = null;
+    }
+    nativeSession = await readNativeSessionSafely(getNativeSessionPath(nodeDir));
+  }
+
+  return {
+    runDir: resolvedRunDir,
+    runId: runState.runId,
+    workflowId: runState.workflowId,
+    runStatus: runState.status,
+    currentNodeId,
+    pendingNodeId: runState.pendingNodeId,
+    currentAttemptId: runState.currentAttemptId,
+    reentryMode: currentNode?.type === 'codex' ? currentNode.reentry?.mode ?? 'resume' : undefined,
+    nodeState,
+    nativeSession,
+    latestTimeline: timeline.at(-1) ?? null,
+  };
+}
+
+function printStatusSnapshot(snapshot: StatusSnapshot): void {
+  console.log(`runId: ${snapshot.runId}`);
+  console.log(`workflowId: ${snapshot.workflowId}`);
+  console.log(`status: ${snapshot.runStatus}`);
+  console.log(`runDir: ${snapshot.runDir}`);
+  console.log(`currentNodeId: ${snapshot.currentNodeId ?? 'null'}`);
+  console.log(`pendingNodeId: ${snapshot.pendingNodeId ?? 'null'}`);
+  console.log(`currentAttemptId: ${snapshot.currentAttemptId ?? 'null'}`);
+  if (snapshot.reentryMode) {
+    console.log(`reentry.mode: ${snapshot.reentryMode}`);
+  }
+  if (snapshot.nodeState) {
+    console.log(`node.status: ${snapshot.nodeState.status}`);
+    console.log(`node.sessionId: ${snapshot.nodeState.sessionId ?? 'null'}`);
+    if (snapshot.nodeState.detail) {
+      console.log(`node.detail: ${snapshot.nodeState.detail}`);
+    }
+  }
+  if (snapshot.nativeSession) {
+    console.log(`native.status: ${snapshot.nativeSession.status}`);
+    console.log(`native.sessionId: ${snapshot.nativeSession.sessionId ?? 'null'}`);
+    console.log(`native.terminalPid: ${snapshot.nativeSession.terminalPid ?? 'null'}`);
+  }
+  if (snapshot.latestTimeline) {
+    console.log(
+      `timeline.latest: step=${snapshot.latestTimeline.stepIndex} node=${snapshot.latestTimeline.nodeId} attempt=${snapshot.latestTimeline.attemptId} status=${snapshot.latestTimeline.status}`,
+    );
+  }
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const { command, rest, flags } = parseArgs(argv);
   if (!command) {
@@ -415,22 +512,37 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (command === 'validate') {
       const filePath = rest[0];
       if (!filePath) {
-        throw new Error('validate 需要 workflow 文件路径');
+        throw new Error('validate requires a workflow file path');
       }
       await loadWorkflowFile(path.resolve(filePath));
-      console.log('workflow 校验通过');
+      console.log('workflow validation passed');
+      return 0;
+    }
+
+    if (command === 'status') {
+      const runDir = rest[0];
+      if (!runDir) {
+        throw new Error('status requires a run directory path');
+      }
+      const snapshot = await buildStatusSnapshot(runDir);
+      if (flags.json === true) {
+        console.log(JSON.stringify(snapshot, null, 2));
+      } else {
+        printStatusSnapshot(snapshot);
+      }
       return 0;
     }
 
     if (command === 'run') {
       const filePath = rest[0];
       if (!filePath) {
-        throw new Error('run 需要 workflow 文件路径');
+        throw new Error('run requires a workflow file path');
       }
 
       const workflow = await loadWorkflowFile(path.resolve(filePath));
       const shouldInteractive =
         flags.interactive === true || (flags['no-interactive'] !== true && process.stdin.isTTY && process.stdout.isTTY);
+      const nativeSplitTerminals = resolveNativeSplitPreference(flags, shouldInteractive);
       const interruptContext = createInterruptContext();
 
       try {
@@ -440,10 +552,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
             defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
             codexCommand,
-            nativeSplitTerminals: flags['native-split-terminals'] === true,
+            nativeSplitTerminals,
             abortSignal: interruptContext.controller.signal,
-            onRunDir: (runDir) => {
-              interruptContext.lastRunDir = runDir;
+            onRunDir: (resolvedRunDir) => {
+              interruptContext.lastRunDir = resolvedRunDir;
             },
           });
           return result.status === 'failed' ? 1 : 0;
@@ -454,6 +566,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             workspaceRoot: flags.workspace ? path.resolve(String(flags.workspace)) : undefined,
             defaultWorkdir: flags.workdir ? path.resolve(String(flags.workdir)) : undefined,
             codexCommand,
+            nativeSplitTerminals,
             abortSignal: interruptContext.controller.signal,
             logger: (line) => console.log(line),
           }),
@@ -462,13 +575,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
         if (result.status === 'paused') {
-          console.log(`当前停在节点: ${result.currentNodeId}`);
-          console.log('执行 flowbraid resume <run-dir> 或 flowbraid send <run-dir> <message> 继续');
+          console.log(`current paused node: ${result.currentNodeId}`);
+          console.log('use flowbraid resume <run-dir> or flowbraid send <run-dir> <message> to continue');
         }
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
         if (error instanceof RunInterruptedError && interruptContext.lastRunDir) {
-          await failRun(interruptContext.lastRunDir, '用户中断运行');
+          await failRun(interruptContext.lastRunDir, 'user interrupted run');
         }
         throw error;
       } finally {
@@ -479,7 +592,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (command === 'resume') {
       const runDir = rest[0];
       if (!runDir) {
-        throw new Error('resume 需要 run 目录路径');
+        throw new Error('resume requires a run directory path');
       }
 
       const resolvedRunDir = path.resolve(runDir);
@@ -498,7 +611,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           const state = await loadRunState(workspace);
           const currentNode = state.currentNodeId ? manifest.workflow.nodes[state.currentNodeId] : null;
           if (currentNode?.type === 'agent_session') {
-            throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
+            throw new Error('agent_session nodes must continue via send, not resume');
           }
           if (state.status === 'paused' && currentNode?.type === 'approval') {
             const approval = await promptApprovalDecision(resolvedRunDir, interruptContext.controller.signal);
@@ -507,7 +620,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           }
         }
         if (decision === 'reject' && !comment) {
-          throw new Error('approval reject 时必须通过 --message 提供打回意见');
+          throw new Error('approval reject requires --message');
         }
 
         const result = await resumeWorkflow(resolvedRunDir, {
@@ -515,17 +628,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             approvalDecision: decision,
             approvalComment: comment,
             codexCommand,
+            nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
             abortSignal: interruptContext.controller.signal,
             logger: (line) => console.log(line),
           }),
-          nativeSplitTerminals: flags['native-split-terminals'] === true,
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
         if (error instanceof RunInterruptedError) {
-          await failRun(resolvedRunDir, '用户中断运行');
+          await failRun(resolvedRunDir, 'user interrupted run');
         }
         throw error;
       } finally {
@@ -536,7 +649,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (command === 'send') {
       const runDir = rest[0];
       if (!runDir) {
-        throw new Error('send 需要 run 目录路径');
+        throw new Error('send requires a run directory path');
       }
       const resolvedRunDir = path.resolve(runDir);
       const interruptContext = createInterruptContext();
@@ -547,32 +660,32 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         let message = rest.slice(1).join(' ').trim();
         if (!message) {
           if (!process.stdin.isTTY || !process.stdout.isTTY) {
-            throw new Error('send 需要 message 参数');
+            throw new Error('send requires a message argument');
           }
           message = (await promptSendMessage(interruptContext.controller.signal)).trim();
         }
         if (!message) {
-          throw new Error('send 的 message 不能为空');
+          throw new Error('send message cannot be empty');
         }
 
         const result = await sendWorkflow(resolvedRunDir, message, {
           ...buildRunnerOptionsFromFlags(flags, {
             codexCommand,
+            nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
             abortSignal: interruptContext.controller.signal,
             interactiveTerminal: { input: process.stdin, output: process.stdout },
             logger: (line) => console.log(line),
           }),
-          nativeSplitTerminals: flags['native-split-terminals'] === true,
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
         if (result.status === 'paused') {
-          console.log(`当前停在节点: ${result.currentNodeId}`);
+          console.log(`current paused node: ${result.currentNodeId}`);
         }
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
         if (error instanceof RunInterruptedError) {
-          await failRun(resolvedRunDir, '用户中断运行');
+          await failRun(resolvedRunDir, 'user interrupted run');
         }
         throw error;
       } finally {
@@ -606,7 +719,7 @@ function createInterruptContext(): {
   const handleSigint = (): void => {
     count += 1;
     if (count === 1) {
-      console.error('收到 Ctrl+C，正在终止当前运行...');
+      console.error('received Ctrl+C, stopping current run...');
       controller.abort(new RunInterruptedError());
       return;
     }

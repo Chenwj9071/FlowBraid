@@ -73,3 +73,7 @@ FlowBraid 当前拆成四层：
 - 会话型节点优先走文件协议和结构化结果，不靠解析自然语言输出猜测“任务是否完成”。
 - PTY 只用于提升交互体验，不承担节点完成判定职责。
 - 正式示例优先使用英文角色提示和本地 demo 文档，以降低 Windows PTY 下中文输出乱码的概率。
+## ������ƣ�2026-05-06��
+- native split �µ� `codex` �ڵ���������ɽڵ㼶 `reentry.mode` ���ƣ�Ĭ���� `resume`��
+- ������������ native codex �ն˺󣬻���� `workdir + startedAt` ����̽���²����� codex `sessionId`��������д�� `nodes/<node-id>/state/native-session.json` �� `nodes/<node-id>/status.json`��
+- ������ͬһ `codex` �ڵ�ʱ��ֻ����ʹ�øýڵ��Լ����һ�γ־û��� `sessionId` �ָ�����ֹ������ `workdir` �ƶ������ڵ�Ự��

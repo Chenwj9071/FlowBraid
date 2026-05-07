@@ -35,8 +35,8 @@ async function runInteractiveRun(workflowFile: string): Promise<RunResult> {
   const command = process.platform === 'win32' ? 'cmd.exe' : 'npx';
   const cliArgs =
     process.platform === 'win32'
-      ? ['/c', 'npx', 'tsx', 'src/cli.ts', 'run', workflowFile, '--interactive']
-      : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive'];
+      ? ['/c', 'npx', 'tsx', 'src/cli.ts', 'run', workflowFile, '--interactive', '--pty']
+      : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive', '--pty'];
   const child = spawn(command, cliArgs, {
     cwd: process.cwd(),
     env: process.env,
@@ -79,8 +79,8 @@ async function runInteractiveReject(workflowFile: string, comment: string): Prom
   const command = process.platform === 'win32' ? 'cmd.exe' : 'npx';
   const cliArgs =
     process.platform === 'win32'
-      ? ['/c', 'npx', 'tsx', 'src/cli.ts', 'run', workflowFile, '--interactive']
-      : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive'];
+      ? ['/c', 'npx', 'tsx', 'src/cli.ts', 'run', workflowFile, '--interactive', '--pty']
+      : ['tsx', 'src/cli.ts', 'run', workflowFile, '--interactive', '--pty'];
   const child = spawn(command, cliArgs, {
     cwd: process.cwd(),
     env: process.env,
@@ -127,7 +127,7 @@ async function runInteractiveRejectWithPowerShellUtf8(workflowFile: string, comm
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
-      `[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); chcp 65001 > $null; npx tsx src/cli.ts run '${workflowFile.replace(/'/g, "''")}' --interactive`,
+      `[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); chcp 65001 > $null; npx tsx src/cli.ts run '${workflowFile.replace(/'/g, "''")}' --interactive --pty`,
     ],
     {
       cwd: process.cwd(),

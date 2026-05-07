@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appendNativeNodeEvent,
   getNativeSessionPath,
+  readLatestCodexSessionIdAfter,
   readLatestCodexSessionId,
   readLatestNativeTerminalEvent,
   readNativeSessionState,
@@ -104,6 +105,25 @@ describe('native session state', () => {
     await utimes(newer, new Date(), new Date(Date.now() + 1000));
 
     const sessionId = await readLatestCodexSessionId(matchingDir, path.join(tempRoot, '.codex', 'sessions'));
+    expect(sessionId).toBe('session-new');
+  });
+
+  it('finds the latest codex session id created after the current launch', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-session-'));
+    const sessionsRoot = path.join(tempRoot, '.codex', 'sessions', '2026', '05', '05');
+    const matchingDir = path.join(tempRoot, 'workspace');
+    await mkdir(sessionsRoot, { recursive: true });
+    await mkdir(matchingDir, { recursive: true });
+
+    const older = path.join(sessionsRoot, 'older.jsonl');
+    const newer = path.join(sessionsRoot, 'newer.jsonl');
+    await writeFile(older, `${JSON.stringify({ type: 'session_meta', payload: { id: 'session-old', cwd: matchingDir } })}\n`, 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const startedAt = new Date().toISOString();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await writeFile(newer, `${JSON.stringify({ type: 'session_meta', payload: { id: 'session-new', cwd: matchingDir } })}\n`, 'utf8');
+
+    const sessionId = await readLatestCodexSessionIdAfter(matchingDir, startedAt, undefined, path.join(tempRoot, '.codex', 'sessions'));
     expect(sessionId).toBe('session-new');
   });
 
