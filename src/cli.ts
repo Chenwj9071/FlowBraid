@@ -20,6 +20,7 @@ import {
 } from './native-session.js';
 import { appendNodeRuntimeEvent, getNodeRuntimeStatePath, readNodeRuntimeState, writeNodeRuntimeState } from './node-runtime.js';
 import type { NativeSessionResult, NativeSessionState, NodeRuntimeState, NodeState, RunTimelineEntry } from './types.js';
+import * as readline from 'node:readline';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
@@ -53,8 +54,22 @@ function resolveCodexCommand(flags: Record<string, string | boolean>): string | 
   return undefined;
 }
 
-async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
+function prepareConsoleForPromptOutput(): void {
+  // Windows PowerShell / Windows Terminal 在某些情况下会保留前一段输出的 \r 覆盖行为，
+  // 导致后续 logger 输出被“贴”到提示符后面。这里在进入 prompt 前明确换到新行并清理当前行。
+  try {
+    if (process.stdout.isTTY) {
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+    }
+  } catch {
+    // best-effort only
+  }
   stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
+}
+
+async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
+  prepareConsoleForPromptOutput();
   const { workspace, manifest } = await loadManifest(runDir);
   const state = await loadRunState(workspace);
   const currentNodeId = state.currentNodeId;
@@ -101,7 +116,7 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
 }
 
 async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
-  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  prepareConsoleForPromptOutput();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     if (promptText) {
@@ -120,7 +135,7 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
 }
 
 async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<string> {
-  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  prepareConsoleForPromptOutput();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([rl.question('agent> '), createAbortPromise(abortSignal, () => rl.close())]);
@@ -130,7 +145,7 @@ async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<str
 }
 
 async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
-  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  prepareConsoleForPromptOutput();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([rl.question('message> '), createAbortPromise(abortSignal, () => rl.close())]);
@@ -866,6 +881,8 @@ function createAbortPromise(abortSignal: AbortSignal | undefined, cleanup?: () =
 }
 
 async function settleTerminalAfterPrompt(): Promise<void> {
+  // Prompt 返回后只做最小换行，避免 Windows 终端在再次 reset 时
+  // 把后续 scheduler / logger 输出粘到同一行。
   try {
     process.stdout.write('\r\n');
   } catch {

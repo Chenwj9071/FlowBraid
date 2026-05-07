@@ -442,4 +442,40 @@ nodes:
   }, 30000);
 
 
+  it('approval 收尾后不会把后续 scheduler 输出粘在同一行', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-cli-approval-line-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(
+      workflowFile,
+      `
+id: interactive-approval-line-demo
+start: approve
+nodes:
+  approve:
+    type: approval
+    prompt: please confirm
+    transitions:
+      approve: done
+      reject: done
+  done:
+    type: end
+    message: done
+`,
+      'utf8',
+    );
+
+    const result = await runInteractiveRun(workflowFile);
+    expect(result.code).toBe(0);
+    const cleaned = result.stdout.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
+    const lines = cleaned.replace(/\r/g, '').split('\n').map((line) => line.trim()).filter(Boolean);
+    expect(lines.some((line) => line.includes('approve/reject'))).toBe(true);
+    expect(lines).toContain('[run] approval decision approve -> approve');
+    expect(lines).toContain('[run] node approve succeeded, next done: decision=approve');
+    expect(lines.some((line) => /approve\/reject\]:.*\[run\] approval decision/.test(line))).toBe(false);
+    expect(result.stderr).toBe('');
+  }, 40000);
+
 });

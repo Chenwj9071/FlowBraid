@@ -627,9 +627,16 @@ export class FlowBraidEngine {
       this.options.logger?.(
         `[native] ${nodeId} terminal close requested for pid ${launched.terminalPid} timeout=${closeTimeoutMs}ms`,
       );
+      const closeAbort = new AbortController();
+      const closePromise = launcher.close(launched.terminalPid, {
+        timeoutMs: closeTimeoutMs,
+        title: `FlowBraid native ${nodeId} [${attemptId}]`,
+        signal: closeAbort.signal,
+      } as unknown as { timeoutMs?: number; title?: string });
       await Promise.race([
-        launcher.close(launched.terminalPid, { timeoutMs: closeTimeoutMs, title: `FlowBraid native ${nodeId} [${attemptId}]` }),
+        closePromise,
         delay(closeTimeoutMs).then(() => {
+          closeAbort.abort();
           throw new Error(`terminal close timed out after ${closeTimeoutMs}ms`);
         }),
       ]);

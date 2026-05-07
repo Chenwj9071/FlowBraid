@@ -165,7 +165,7 @@ export interface RunnerOptions {
       bootstrapCommand?: string;
     keepOpenOnExit?: boolean;
     }): Promise<{ terminalPid: number }>;
-    close(terminalPid: number, options?: { timeoutMs?: number; title?: string }): Promise<void>;
+    close(terminalPid: number, options?: { timeoutMs?: number; title?: string; signal?: AbortSignal }): Promise<void>;
   };
   abortSignal?: AbortSignal;
 }

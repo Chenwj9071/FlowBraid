@@ -46,7 +46,17 @@ nodes:
       - If the latest human feedback asks for extra explanation, address it after the verify requirements are satisfied
       - Only modify calc.js unless the task explicitly requires something else
     outputFile: develop-last-message.md
-    next: verify
+    next: review
+
+  review:
+    type: approval
+    prompt: |
+      这是 develop 完成后的人工审核节点。
+      - approve：继续进入 verify 节点做自动化验收
+      - reject：回到 develop 节点继续修改
+    transitions:
+      approve: verify
+      reject: develop
 
   verify:
     type: codex

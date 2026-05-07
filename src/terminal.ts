@@ -3,8 +3,11 @@ import type { TerminalSession } from './types.js';
 const TERMINAL_RESET_SEQUENCE = [
   '\r',
   '\n',
+  '\u001b[0m',
   '\u001b[?1l',
   '\u001b[?25h',
+  '\u001b[?6l',
+  '\u001b[?7h',
   '\u001b[?66l',
   '\u001b[?1000l',
   '\u001b[?1002l',
@@ -15,6 +18,7 @@ const TERMINAL_RESET_SEQUENCE = [
   '\u001b[?2004l',
   '\u001b[?9001l',
   '\u001b[?1049l',
+  '\u001b[r',
   '\u001b[>4;0m',
 ].join('');
 

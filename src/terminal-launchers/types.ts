@@ -15,7 +15,7 @@ export interface ExternalTerminalLauncher {
   launch(request: ExternalTerminalLaunchRequest): Promise<ExternalTerminalLaunchResult>;
   close(
     terminalPid: number,
-    options?: { timeoutMs?: number; title?: string },
+    options?: { timeoutMs?: number; title?: string; signal?: AbortSignal },
   ): Promise<void>;
 }
 

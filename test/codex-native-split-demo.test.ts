@@ -156,7 +156,7 @@ describe('codex native split demo', () => {
     });
 
     expect(firstResult.status).toBe('paused');
-    expect(firstResult.currentNodeId).toBe('approve');
+    expect(firstResult.currentNodeId).toBe('review');
 
     const rejectResult = await resumeWorkflow(firstResult.runDir, {
       approvalDecision: 'reject',
@@ -168,7 +168,19 @@ describe('codex native split demo', () => {
     });
 
     expect(rejectResult.status).toBe('paused');
-    expect(rejectResult.currentNodeId).toBe('approve');
+    expect(rejectResult.currentNodeId).toBe('review');
+
+    const reviewApproved = await resumeWorkflow(firstResult.runDir, {
+      approvalDecision: 'approve',
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+      logger: (line) => logs.push(line),
+    });
+
+    expect(reviewApproved.status).toBe('paused');
+    // approve review -> run verify (reject) -> route to develop -> pause again at review
+    expect(reviewApproved.currentNodeId).toBe('review');
 
     const finalResult = await resumeWorkflow(firstResult.runDir, {
       approvalDecision: 'approve',
@@ -178,7 +190,19 @@ describe('codex native split demo', () => {
       logger: (line) => logs.push(line),
     });
 
-    expect(finalResult.status).toBe('completed');
+    // approve review -> run verify (approve) -> pause at final approve node
+    expect(finalResult.status).toBe('paused');
+    expect(finalResult.currentNodeId).toBe('approve');
+
+    const finalApproval = await resumeWorkflow(firstResult.runDir, {
+      approvalDecision: 'approve',
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+      logger: (line) => logs.push(line),
+    });
+
+    expect(finalApproval.status).toBe('completed');
 
     const calcScript = await readFile(path.join(workflowDir, 'demo-workdir', 'calc.js'), 'utf8');
     expect(calcScript).toContain('Adds two CLI numbers');
