@@ -22,7 +22,7 @@ async function createFakeReviewRewriteCodex(binDir: string): Promise<void> {
     '',
     'const args = process.argv.slice(2);',
     'const parsed = parseArgs(args);',
-    "const mode = process.env.FLOWBRAID_CODEX_MODE || 'exec';",
+    "const mode = process.env.FLOWBRAID_CODEX_MODE || (process.env.FLOWBRAID_NODE_ID === 'verify' ? 'review' : 'exec');",
     "if (mode === 'exec') {",
     "  if (parsed.outputPath) fs.writeFileSync(parsed.outputPath, 'develop ok\\n', 'utf8');",
     '  process.exit(0);',

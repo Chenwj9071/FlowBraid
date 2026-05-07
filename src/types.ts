@@ -13,13 +13,7 @@ export interface WorkflowBaseNode {
   type: NodeKind;
   title?: string;
   next?: string;
-  transitions?: {
-    success?: string;
-    failure?: string;
-    default?: string;
-    approve?: string;
-    reject?: string;
-  };
+  transitions?: Record<string, string | null | undefined>;
 }
 
 export type CodexReentryMode = 'resume' | 'new_with_history' | 'new';
@@ -38,7 +32,6 @@ export interface ShellNodeDefinition extends WorkflowBaseNode {
 
 export interface CodexNodeDefinition extends WorkflowBaseNode {
   type: 'codex';
-  mode: 'exec' | 'review';
   prompt: string;
   cwd?: string;
   workdir?: string;
@@ -46,6 +39,7 @@ export interface CodexNodeDefinition extends WorkflowBaseNode {
   model?: string;
   outputFile?: string;
   reentry?: CodexReentryOptions;
+  mode?: 'exec' | 'review';
 }
 
 export interface AgentSessionNodeDefinition extends WorkflowBaseNode {
@@ -155,6 +149,8 @@ export interface RunnerOptions {
   defaultWorkdir?: string;
   logger?: (line: string) => void;
   maxSteps?: number;
+  terminalCloseGraceMs?: number;
+  terminalCloseTimeoutMs?: number;
   codexCommand?: string;
   approvalDecision?: 'approve' | 'reject';
   approvalComment?: string;
@@ -167,9 +163,9 @@ export interface RunnerOptions {
       command: string;
       args: string[];
       bootstrapCommand?: string;
-      keepOpenOnExit?: boolean;
+    keepOpenOnExit?: boolean;
     }): Promise<{ terminalPid: number }>;
-    close(terminalPid: number): Promise<void>;
+    close(terminalPid: number, options?: { timeoutMs?: number; title?: string }): Promise<void>;
   };
   abortSignal?: AbortSignal;
 }
@@ -205,6 +201,24 @@ export interface AgentSessionMessage {
 }
 
 export type NativeSessionStatus = 'launching' | 'running' | 'completed' | 'failed' | 'paused' | 'aborting';
+
+export type NodeRuntimeStatus = 'launching' | 'running' | 'waiting_input' | 'paused' | 'completed' | 'failed' | 'timed_out' | 'canceled';
+
+export interface NodeRuntimeState {
+  nodeId: string;
+  attemptId?: string;
+  status: NodeRuntimeStatus;
+  outcome?: string;
+  sessionId?: string;
+  terminalPid?: number;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  summary?: string;
+  reason?: string;
+  error?: string;
+  lastArtifactPath?: string;
+}
 
 export interface NativeSessionResult {
   kind: 'complete' | 'fail' | 'pause';

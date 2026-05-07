@@ -47,3 +47,14 @@ export function resetTerminalForPrompt(
 export function getTerminalResetSequence(): string {
   return TERMINAL_RESET_SEQUENCE;
 }
+
+export function stabilizeTerminalForPrompt(
+  terminal: Pick<TerminalSession, 'input' | 'output'> | { input: NodeJS.ReadableStream; output: NodeJS.WritableStream },
+): void {
+  resetTerminalForPrompt(terminal);
+  try {
+    terminal.output.write('\r\n');
+  } catch {
+    // Ignore best-effort line normalization failures.
+  }
+}

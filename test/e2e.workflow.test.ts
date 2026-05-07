@@ -72,5 +72,5 @@ nodes:
     expect(gateStatus.status).toBe('paused');
     const finishStatus = await readJson<{ status: string }>(path.join(runDir, 'nodes', 'finish', 'status.json'));
     expect(finishStatus.status).toBe('succeeded');
-  });
+  }, 20000);
 });

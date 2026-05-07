@@ -13,7 +13,10 @@ export interface ExternalTerminalLaunchResult {
 
 export interface ExternalTerminalLauncher {
   launch(request: ExternalTerminalLaunchRequest): Promise<ExternalTerminalLaunchResult>;
-  close(terminalPid: number): Promise<void>;
+  close(
+    terminalPid: number,
+    options?: { timeoutMs?: number; title?: string },
+  ): Promise<void>;
 }
 
 export interface ExternalTerminalController {

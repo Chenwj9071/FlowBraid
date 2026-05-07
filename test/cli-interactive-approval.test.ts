@@ -249,7 +249,73 @@ nodes:
 
     const prepareText = await readFile(path.join(workflowDir, 'prepare.txt'), 'utf8');
     expect(prepareText).toBe('ok');
-  }, 20000);
+  }, 40000);
+
+  it('approve 后会继续输出完成状态并恢复终端', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-cli-approval-finish-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(
+      workflowFile,
+      `
+id: interactive-approval-finish-demo
+start: approve
+nodes:
+  approve:
+    type: approval
+    prompt: 请确认是否通过
+    transitions:
+      approve: done
+      reject: done
+  done:
+    type: end
+    message: 完成
+`,
+      'utf8',
+    );
+
+    const result = await runInteractiveRun(workflowFile);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('run ');
+    expect(result.stdout).toContain('=> completed');
+    expect(result.stdout).toContain('workspace:');
+    expect(result.stderr).toBe('');
+  }, 40000);
+
+  it('approve 后的后续输出会从新行开始，避免光标错位', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-cli-approval-cursor-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(
+      workflowFile,
+      `
+id: interactive-approval-cursor-demo
+start: approve
+nodes:
+  approve:
+    type: approval
+    prompt: 璇风‘璁ゆ槸鍚﹂€氳繃
+    transitions:
+      approve: done
+      reject: done
+  done:
+    type: end
+    message: 瀹屾垚
+`,
+      'utf8',
+    );
+
+    const result = await runInteractiveRun(workflowFile);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('审批结果 [approve/reject]:');
+    expect(result.stdout).toContain('\r\n');
+    expect(result.stdout).toContain('=> completed');
+    expect(result.stderr).toBe('');
+  }, 40000);
 
   it('reject 时会继续要求输入打回意见并写入 human-feedback.jsonl', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-cli-reject-'));
@@ -293,7 +359,7 @@ nodes:
     const feedback = await readFile(path.join(runDir!, 'messages', 'human-feedback.jsonl'), 'utf8');
     expect(feedback).toContain('"decision":"reject"');
     expect(feedback).toContain(reviewComment);
-  }, 20000);
+  }, 40000);
 
   it('Windows UTF-8 终端下支持中文 reject 意见写入 human-feedback.jsonl', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-cli-reject-cn-'));

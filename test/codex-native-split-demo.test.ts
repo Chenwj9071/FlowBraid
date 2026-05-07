@@ -6,6 +6,7 @@ import { loadWorkflowFile } from '../src/workflow.js';
 import { resumeWorkflow, startWorkflow } from '../src/engine.js';
 import { readJson } from '../src/utils.js';
 import { getNativeSessionPath, writeNativeSessionState } from '../src/native-session.js';
+import { getNodeRuntimeStatePath, writeNodeRuntimeState } from '../src/node-runtime.js';
 
 describe('codex native split demo', () => {
   it('supports verify rejection, human reject feedback, and final completion in native-split mode', async () => {
@@ -58,6 +59,18 @@ describe('codex native split demo', () => {
                   ].join('\n');
             await writeFile(calcPath, script, 'utf8');
             await writeFile(path.join(nodeDir, 'artifacts', 'develop-last-message.md'), `develop round ${developCount}\n`, 'utf8');
+            await writeNodeRuntimeState(getNodeRuntimeStatePath(nodeDir), {
+              nodeId: 'develop',
+              attemptId,
+              status: 'completed',
+              outcome: 'success',
+              sessionId: `session-develop-${developCount}`,
+              terminalPid,
+              startedAt: '2026-05-05T10:00:00.000Z',
+              updatedAt: '2026-05-05T10:00:05.000Z',
+              completedAt: '2026-05-05T10:00:05.000Z',
+              summary: `develop round ${developCount}`,
+            });
             await writeNativeSessionState(getNativeSessionPath(nodeDir), {
               mode: 'native_split_terminal',
               attemptId,
@@ -84,7 +97,7 @@ describe('codex native split demo', () => {
                   'case 1 2 => 3',
                   'case 10 -4 => 6',
                   'case 1.5 2.5 => 4',
-                  'verdict: reject',
+                  'final outcome: reject',
                   'Comments are missing. Add a clear comment in calc.js.',
                   '',
                 ].join('\n')
@@ -93,11 +106,23 @@ describe('codex native split demo', () => {
                   'case 1 2 => 3',
                   'case 10 -4 => 6',
                   'case 1.5 2.5 => 4',
-                  'verdict: approve',
+                  'final outcome: approve',
                   'Behavior and comments are acceptable.',
                   '',
                 ].join('\n');
           await writeFile(path.join(nodeDir, 'artifacts', 'verify-report.md'), report, 'utf8');
+          await writeNodeRuntimeState(getNodeRuntimeStatePath(nodeDir), {
+            nodeId: 'verify',
+            attemptId,
+            status: 'completed',
+            outcome: verifyCount === 1 ? 'reject' : 'approve',
+            sessionId: `session-verify-${verifyCount}`,
+            terminalPid,
+            startedAt: '2026-05-05T10:00:10.000Z',
+            updatedAt: '2026-05-05T10:00:15.000Z',
+            completedAt: '2026-05-05T10:00:15.000Z',
+            summary: verifyCount === 1 ? 'verify reject' : 'verify approve',
+          });
           await writeNativeSessionState(getNativeSessionPath(nodeDir), {
             mode: 'native_split_terminal',
             attemptId,

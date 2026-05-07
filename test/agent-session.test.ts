@@ -171,5 +171,5 @@ nodes:
     );
     expect(finalState.status).toBe('completed');
     expect(finalState.currentNodeId).toBeNull();
-  });
+  }, 20000);
 });

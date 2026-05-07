@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { once } from 'node:events';
 import { spawn as spawnPty, type IPty } from 'node-pty';
+import { fileURLToPath } from 'node:url';
 import { ensureDir } from '../utils.js';
 import type { TerminalSession } from '../types.js';
 import { RunInterruptedError, isAbortSignalTriggered } from '../errors.js';
@@ -432,16 +433,34 @@ export function buildFlowBraidNodeCommandPrefix(
   platform: NodeJS.Platform = process.platform,
   cliArgv: string[] = process.argv,
 ): string {
-  const entryPath = cliArgv[1];
-  if (!entryPath) {
-    throw new Error('Cannot determine FlowBraid CLI entry path for native-split mode');
-  }
+  const entryPath = resolveFlowBraidCliEntryPath(cliArgv);
 
   if (entryPath.endsWith('.ts')) {
     return platform === 'win32' ? `tsx "${entryPath}"` : `tsx "${entryPath}"`;
   }
 
   return `"${process.execPath}" "${entryPath}"`;
+}
+
+function resolveFlowBraidCliEntryPath(cliArgv: string[]): string {
+  const envEntry = process.env.FLOWBRAID_CLI_ENTRY?.trim();
+  if (envEntry) {
+    return envEntry;
+  }
+
+  const argvEntry = cliArgv[1];
+  if (argvEntry && /(?:^|[\\/])cli\.(?:ts|js)$/iu.test(argvEntry)) {
+    return argvEntry;
+  }
+
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [path.resolve(moduleDir, '../cli.ts'), path.resolve(moduleDir, '../cli.js')]) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error('Cannot determine FlowBraid CLI entry path for native-split mode');
 }
 
 export function buildNativeCodexCliInvocation(options: {

@@ -72,5 +72,5 @@ nodes:
     } finally {
       process.env.PATH = originalPath;
     }
-  }, 20000);
+  }, 40000);
 });

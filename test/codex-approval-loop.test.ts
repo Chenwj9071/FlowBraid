@@ -43,7 +43,7 @@ async function createFakeCodex(binDir: string): Promise<void> {
     'const outputPath = parsed.outputPath;',
     'const workdir = parsed.workdir;',
     'const prompt = readStdin();',
-    "const mode = process.env.FLOWBRAID_CODEX_MODE || 'exec';",
+    "const mode = process.env.FLOWBRAID_CODEX_MODE || (/legacy\\.node\\.mode:\\s*review/i.test(prompt) ? 'review' : 'exec');",
     "const resumeCount = Number(process.env.FLOWBRAID_RESUME_COUNT || '0');",
     "const nodeArtifactsDir = process.env.FLOWBRAID_NODE_ARTIFACTS_DIR || path.join(workdir, '.flowbraid-missing-artifacts');",
     "const generatedDir = path.join(workdir, 'generated');",

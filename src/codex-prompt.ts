@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import type { CodexNodeDefinition, RunWorkspace, WorkflowDefinition, WorkflowSourceMeta } from './types.js';
+import type {
+  CodexNodeDefinition,
+  CodexReentryMode,
+  RunWorkspace,
+  WorkflowDefinition,
+  WorkflowSourceMeta,
+} from './types.js';
 import { buildFlowBraidNodeCommandPrefix } from './executors/codex.js';
 
 export interface CodexPromptDirectories {
@@ -12,6 +18,7 @@ export interface CodexPromptOptions {
   protocolMode?: 'standard' | 'native-split';
   resumeSession?: boolean;
   includeReentryHistory?: boolean;
+  reentryMode?: CodexReentryMode;
 }
 
 type RuntimeWorkflow = WorkflowDefinition & Partial<WorkflowSourceMeta>;
@@ -32,26 +39,33 @@ export function buildCodexPrompt(
   const contextInstructionsPath = path.join(dirs.contextDir, 'AGENTS.md');
   const latestVerifyReport = tryReadPromptContextSync(verifyReportPath) ?? 'NONE';
   const latestHumanFeedback = tryReadLastHumanFeedbackSync(humanFeedbackPath) ?? 'NONE';
+  const roleText = inferCodexRole(nodeId, node.prompt);
   const modeText =
-    node.mode === 'review'
-      ? 'You are the verification node. Start from context.dir for your role instructions, but actually run and inspect the deliverable inside workdir. Return verdict: approve or verdict: reject exactly as required.'
-      : 'You are the development node. Start from context.dir for your role instructions, but modify the shared business files inside workdir and deliver a runnable result.';
+    roleText === 'verification'
+      ? 'You are a verification agent node. Start from context.dir for your role instructions, but actually run and inspect the deliverable inside workdir. Report the final workflow outcome through FlowBraid node commands.'
+      : 'You are a development agent node. Start from context.dir for your role instructions, but modify the shared business files inside workdir and deliver a runnable result. Report the final workflow outcome through FlowBraid node commands.';
   const protocolMode = options.protocolMode ?? 'standard';
-  const resumeSession = options.resumeSession === true;
+  const reentryMode = options.reentryMode ?? (options.resumeSession ? 'resume' : 'new');
   const includeReentryHistory = options.includeReentryHistory !== false;
   const flowbraidNodePrefix = buildFlowBraidNodeCommandPrefix();
-  const completeCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --summary "done"`;
+  const completeSuccessCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --outcome "success" --summary "done"`;
+  const completeApproveCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --outcome "approve" --summary "approved"`;
+  const completeRejectCommand = `${flowbraidNodePrefix} node complete --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --outcome "reject" --summary "rejected"`;
   const failCommand = `${flowbraidNodePrefix} node fail --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --message "explain the failure"`;
   const artifactCommand = `${flowbraidNodePrefix} node artifact --run-dir "${workspace.runDir}" --node-id "${nodeId}" --attempt-id "${attemptId}" --file "${path.join(
     'artifacts',
     node.outputFile ?? 'codex-last-message.md',
   )}"`;
 
-  if (resumeSession) {
+  if (reentryMode !== 'new') {
     return [
-      node.mode === 'review'
-        ? 'Continue the existing verification session. Do not restart the whole task. Use the existing session history and only process the latest re-entry context below.'
-        : 'Continue the existing development session. Do not restart the whole task. Use the existing session history and only process the latest re-entry context below.',
+      reentryMode === 'resume'
+        ? roleText === 'verification'
+          ? 'Continue the existing verification session. Do not restart the whole task. Use the existing session history and only process the latest re-entry context below.'
+          : 'Continue the existing development session. Do not restart the whole task. Use the existing session history and only process the latest re-entry context below.'
+        : roleText === 'verification'
+          ? 'Start a new verification session with the existing history. Do not restart the task from scratch. Use the latest re-entry context below as the current working state.'
+          : 'Start a new development session with the existing history. Do not restart the task from scratch. Use the latest re-entry context below as the current working state.',
       '',
       `workflow.id: ${workflow.id}`,
       `node.id: ${nodeId}`,
@@ -65,12 +79,14 @@ export function buildCodexPrompt(
       '- Do not ask for the original task again and do not restart from scratch.',
       '- Focus only on the latest re-entry reason and the latest workflow context below.',
       '',
+      `legacy.node.mode: ${node.mode ?? roleText}`,
+      '',
       includeReentryHistory
         ? ['latest.verify.report:', latestVerifyReport, 'latest.human.feedback:', latestHumanFeedback].join('\n')
         : 'Re-entry context is intentionally minimal for this round.',
       '',
-      node.mode === 'review'
-        ? 'Re-entry task: rerun verification against the latest deliverable, produce an updated verdict, and report only the incremental outcome required for this round.'
+      roleText === 'verification'
+        ? 'Re-entry task: rerun verification against the latest deliverable, then report the final outcome for this attempt using FlowBraid node commands.'
         : 'Re-entry task: apply the latest verification or human feedback to the existing deliverable and finish this round with the smallest required change.',
       '',
       protocolMode === 'native-split'
@@ -79,7 +95,10 @@ export function buildCodexPrompt(
             '- You are running in a native codex terminal managed by FlowBraid.',
             '- Do not silently exit the terminal without reporting status.',
             `- When you produce the key node artifact, run: ${artifactCommand}`,
-            `- When the node task is completed, run: ${completeCommand}`,
+            `- When the node task is completed, report a final outcome using one of these commands:`,
+            `  - ${completeSuccessCommand}`,
+            `  - ${completeApproveCommand}`,
+            `  - ${completeRejectCommand}`,
             `- If the node cannot continue, run: ${failCommand}`,
             '- After reporting a final state, exit the current codex session immediately so FlowBraid can close the terminal cleanly.',
             '- The main FlowBraid process will continue the workflow only after those commands update node state.',
@@ -93,6 +112,7 @@ export function buildCodexPrompt(
   return [
     modeText,
     '',
+    `legacy.node.mode: ${node.mode ?? roleText}`,
     `workflow.id: ${workflow.id}`,
     `node.id: ${nodeId}`,
     `run.dir: ${workspace.runDir}`,
@@ -120,14 +140,14 @@ export function buildCodexPrompt(
     node.prompt,
     '',
     'Shared requirements:',
-    node.mode === 'review'
-      ? '1. You must execute the verification commands and checks from the task. Do not review by reading code only.'
+    roleText === 'verification'
+      ? '1. You must execute the verification commands and checks from the task. Do not verify by reading code only.'
       : '1. Only modify business files in the current workdir. Do not create extra test scripts, design docs, or unrelated files unless explicitly required.',
-    node.mode === 'review'
+    roleText === 'verification'
       ? '2. Your conclusion must cover every acceptance criterion in the task, including comments, output format, and human feedback handling requirements.'
       : '2. Respect the current module system and runtime environment. The delivered script must run directly in this repository configuration.',
-    node.mode === 'review'
-      ? '3. Your final output must contain a standalone line with verdict: approve or verdict: reject, plus the reason.'
+    roleText === 'verification'
+      ? '3. When verification is complete, report the final outcome with FlowBraid node commands. Use approve or reject when the task asks for an acceptance decision.'
       : '3. Your final output must state which files you changed and how you verified the result.',
     protocolMode === 'native-split'
       ? [
@@ -136,13 +156,35 @@ export function buildCodexPrompt(
           '- You are running in a native codex terminal managed by FlowBraid.',
           '- Do not silently exit the terminal without reporting status.',
           `- When you produce the key node artifact, run: ${artifactCommand}`,
-          `- When the node task is completed, run: ${completeCommand}`,
+          `- When the node task is completed, report a final outcome using one of these commands:`,
+          `  - ${completeSuccessCommand}`,
+          `  - ${completeApproveCommand}`,
+          `  - ${completeRejectCommand}`,
           `- If the node cannot continue, run: ${failCommand}`,
           '- After reporting a final state, exit the current codex session immediately so FlowBraid can close the terminal cleanly.',
           '- The main FlowBraid process will continue the workflow only after those commands update node state.',
         ].join('\n')
       : null,
   ].join('\n');
+}
+
+function inferCodexRole(nodeId: string, prompt: string): 'development' | 'verification' {
+  const lowerNodeId = nodeId.toLowerCase();
+  const lowerPrompt = prompt.toLowerCase();
+  if (lowerNodeId.includes('develop') || lowerNodeId.includes('build') || lowerNodeId.includes('implement')) {
+    return 'development';
+  }
+  if (
+    lowerNodeId.includes('verify') ||
+    lowerNodeId.includes('review') ||
+    lowerPrompt.includes('verification') ||
+    lowerPrompt.includes('verify ') ||
+    lowerPrompt.includes('code review') ||
+    lowerPrompt.includes('acceptance')
+  ) {
+    return 'verification';
+  }
+  return 'development';
 }
 
 export function buildNewSessionReentryPrompt(
@@ -165,7 +207,7 @@ export function buildNewSessionReentryPrompt(
     dirs,
     {
       protocolMode: options.protocolMode,
-      resumeSession: true,
+      reentryMode: options.includeHistory === false ? 'new' : 'new_with_history',
       includeReentryHistory: options.includeHistory !== false,
     },
   );

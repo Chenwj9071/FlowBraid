@@ -8,7 +8,7 @@ import { loadManifest, loadRunState, loadRunTimeline, persistRunState } from './
 import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
 import { RunInterruptedError } from './errors.js';
 import { appendText, nowIso, readJson } from './utils.js';
-import { resetTerminalForPrompt } from './terminal.js';
+import { stabilizeTerminalForPrompt } from './terminal.js';
 import { parseArgs } from './cli-args.js';
 import { buildRunnerOptionsFromFlags } from './runtime-options.js';
 import {
@@ -18,7 +18,8 @@ import {
   updateNativeSessionState,
   writeNativeSessionState,
 } from './native-session.js';
-import type { NativeSessionResult, NativeSessionState, NodeState, RunTimelineEntry } from './types.js';
+import { appendNodeRuntimeEvent, getNodeRuntimeStatePath, readNodeRuntimeState, writeNodeRuntimeState } from './node-runtime.js';
+import type { NativeSessionResult, NativeSessionState, NodeRuntimeState, NodeState, RunTimelineEntry } from './types.js';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
@@ -53,7 +54,7 @@ function resolveCodexCommand(flags: Record<string, string | boolean>): string | 
 }
 
 async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
-  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const { workspace, manifest } = await loadManifest(runDir);
   const state = await loadRunState(workspace);
   const currentNodeId = state.currentNodeId;
@@ -83,23 +84,24 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
             ]);
             const trimmed = feedback.trim();
             if (trimmed) {
+              finishPromptLine();
               return { decision: normalized, comment: trimmed };
             }
             console.log('reject 时必须提供打回意见');
           }
         }
+        finishPromptLine();
         return { decision: normalized };
       }
       console.log('请输入 approve 或 reject');
     }
   } finally {
     rl.close();
-    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
 async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
-  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     if (promptText) {
@@ -114,29 +116,26 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
     }
   } finally {
     rl.close();
-    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
 async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<string> {
-  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([rl.question('agent> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
     rl.close();
-    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
 async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
-  resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
+  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([rl.question('message> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
     rl.close();
-    resetTerminalForPrompt({ input: process.stdin, output: process.stdout });
   }
 }
 
@@ -174,6 +173,7 @@ async function runInteractiveWorkflow(
 
     if (currentNode.type === 'approval') {
       const approval = await promptApprovalDecision(result.runDir, options.abortSignal);
+      await settleTerminalAfterPrompt();
       result = await resumeWorkflow(result.runDir, {
         approvalDecision: approval.decision,
         approvalComment: approval.comment,
@@ -189,6 +189,7 @@ async function runInteractiveWorkflow(
 
     if (currentNode.type === 'gate') {
       await promptGateContinue(currentNode.prompt ?? '', options.abortSignal);
+      await settleTerminalAfterPrompt();
       result = await resumeWorkflow(result.runDir, {
         codexCommand: options.codexCommand,
         nativeSplitTerminals: options.nativeSplitTerminals,
@@ -208,6 +209,7 @@ async function runInteractiveWorkflow(
         console.log(`workspace: ${result.runDir}`);
         return result;
       }
+      await settleTerminalAfterPrompt();
       result = await sendWorkflow(result.runDir, message, {
         codexCommand: options.codexCommand,
         nativeSplitTerminals: options.nativeSplitTerminals,
@@ -237,11 +239,20 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   const { workspace } = await loadManifest(runDir);
   const nodeDir = path.join(workspace.nodesDir, nodeId);
   const sessionPath = getNativeSessionPath(nodeDir);
+  const runtimeStatePath = getNodeRuntimeStatePath(nodeDir);
   const existingState = await readNativeSessionSafely(sessionPath);
+  const existingRuntimeState = await readNodeRuntimeStateSafely(runtimeStatePath);
   const baseState = existingState ?? {
     mode: 'native_split_terminal',
     status: 'launching',
     attemptId: flags['attempt-id'] ? String(flags['attempt-id']) : undefined,
+    startedAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  const baseRuntimeState: NodeRuntimeState = existingRuntimeState ?? {
+    nodeId,
+    attemptId: flags['attempt-id'] ? String(flags['attempt-id']) : undefined,
+    status: 'launching',
     startedAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -262,6 +273,14 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         updatedAt: nowIso(),
       };
       await writeNativeSessionState(sessionPath, nextState);
+      await writeNodeRuntimeState(runtimeStatePath, {
+        ...baseRuntimeState,
+        attemptId,
+        status: 'running',
+        sessionId,
+        terminalPid,
+        updatedAt: nowIso(),
+      });
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.started',
         nodeId,
@@ -269,11 +288,21 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         at: nowIso(),
         terminalPid,
       });
+      await appendNodeRuntimeEvent(workspace.messagesDir, {
+        type: 'node.state',
+        nodeId,
+        attemptId,
+        status: 'running',
+        sessionId,
+        terminalPid,
+        at: nowIso(),
+      });
       return 0;
     }
 
     case 'complete': {
       const summary = flags.summary ? String(flags.summary) : undefined;
+      const outcome = flags.outcome ? String(flags.outcome) : undefined;
       const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       await updateNativeSessionState(sessionPath, (current) => ({
@@ -284,12 +313,32 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         attemptId,
         sessionId,
       }));
+      await writeNodeRuntimeState(runtimeStatePath, {
+        ...baseRuntimeState,
+        attemptId,
+        status: 'completed',
+        outcome,
+        sessionId,
+        updatedAt: nowIso(),
+        completedAt: nowIso(),
+        summary,
+      });
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.completed',
         nodeId,
         attemptId,
         at: nowIso(),
         summary,
+      });
+      await appendNodeRuntimeEvent(workspace.messagesDir, {
+        type: 'node.state',
+        nodeId,
+        attemptId,
+        status: 'completed',
+        outcome,
+        sessionId,
+        summary,
+        at: nowIso(),
       });
       return 0;
     }
@@ -309,12 +358,31 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         attemptId,
         sessionId,
       }));
+      await writeNodeRuntimeState(runtimeStatePath, {
+        ...baseRuntimeState,
+        attemptId,
+        status: 'failed',
+        sessionId,
+        updatedAt: nowIso(),
+        completedAt: nowIso(),
+        error: message,
+        reason: message,
+      });
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.failed',
         nodeId,
         attemptId,
         at: nowIso(),
         message,
+      });
+      await appendNodeRuntimeEvent(workspace.messagesDir, {
+        type: 'node.state',
+        nodeId,
+        attemptId,
+        status: 'failed',
+        sessionId,
+        reason: message,
+        at: nowIso(),
       });
       return 0;
     }
@@ -334,12 +402,30 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         attemptId,
         sessionId,
       }));
+      await writeNodeRuntimeState(runtimeStatePath, {
+        ...baseRuntimeState,
+        attemptId,
+        status: 'paused',
+        sessionId,
+        updatedAt: nowIso(),
+        completedAt: nowIso(),
+        reason,
+      });
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.paused',
         nodeId,
         attemptId,
         at: nowIso(),
         reason,
+      });
+      await appendNodeRuntimeEvent(workspace.messagesDir, {
+        type: 'node.state',
+        nodeId,
+        attemptId,
+        status: 'paused',
+        sessionId,
+        reason,
+        at: nowIso(),
       });
       return 0;
     }
@@ -359,6 +445,14 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         updatedAt: nowIso(),
         lastArtifactPath: file,
       }));
+      await writeNodeRuntimeState(runtimeStatePath, {
+        ...baseRuntimeState,
+        attemptId,
+        status: baseRuntimeState.status,
+        sessionId,
+        updatedAt: nowIso(),
+        lastArtifactPath: file,
+      });
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.artifact',
         nodeId,
@@ -383,6 +477,13 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
           updatedAt: nowIso(),
           lastHeartbeatAt: nowIso(),
         };
+      });
+      await writeNodeRuntimeState(runtimeStatePath, {
+        ...baseRuntimeState,
+        attemptId,
+        status: baseRuntimeState.status === 'launching' ? 'running' : baseRuntimeState.status,
+        sessionId,
+        updatedAt: nowIso(),
       });
       await appendNativeNodeEvent(workspace.messagesDir, {
         type: 'node.native.heartbeat',
@@ -417,6 +518,14 @@ function buildNativeTerminalState(
 async function readNativeSessionSafely(sessionPath: string): Promise<NativeSessionState | null> {
   try {
     return await readNativeSessionState(sessionPath);
+  } catch {
+    return null;
+  }
+}
+
+async function readNodeRuntimeStateSafely(filePath: string): Promise<NodeRuntimeState | null> {
+  try {
+    return await readNodeRuntimeState(filePath);
   } catch {
     return null;
   }
@@ -558,6 +667,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
               interruptContext.lastRunDir = resolvedRunDir;
             },
           });
+          stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
           return result.status === 'failed' ? 1 : 0;
         }
 
@@ -578,6 +688,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           console.log(`current paused node: ${result.currentNodeId}`);
           console.log('use flowbraid resume <run-dir> or flowbraid send <run-dir> <message> to continue');
         }
+        stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
         if (error instanceof RunInterruptedError && interruptContext.lastRunDir) {
@@ -635,6 +746,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         });
         console.log(`run ${result.runId} => ${result.status}`);
         console.log(`workspace: ${result.runDir}`);
+        stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
         if (error instanceof RunInterruptedError) {
@@ -682,6 +794,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         if (result.status === 'paused') {
           console.log(`current paused node: ${result.currentNodeId}`);
         }
+        stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
         if (error instanceof RunInterruptedError) {
@@ -750,6 +863,23 @@ function createAbortPromise(abortSignal: AbortSignal | undefined, cleanup?: () =
 
     abortSignal.addEventListener('abort', handleAbort, { once: true });
   });
+}
+
+async function settleTerminalAfterPrompt(): Promise<void> {
+  try {
+    process.stdout.write('\r\n');
+  } catch {
+    // Ignore best-effort line separation failures.
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+function finishPromptLine(): void {
+  try {
+    process.stdout.write('\r\n');
+  } catch {
+    // Ignore best-effort line separation failures.
+  }
 }
 
 async function failRun(runDir: string, reason: string): Promise<void> {

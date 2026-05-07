@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getTerminalResetSequence, resetTerminalForPrompt } from '../src/terminal.js';
+import { getTerminalResetSequence, resetTerminalForPrompt, stabilizeTerminalForPrompt } from '../src/terminal.js';
 
 describe('terminal reset', () => {
   it('restores normal terminal modes before readline takes over', () => {
@@ -29,5 +29,27 @@ describe('terminal reset', () => {
     expect(fakeInput.isRaw).toBe(false);
     expect(writes).toEqual([getTerminalResetSequence()]);
     expect(writes[0].startsWith('\r\n')).toBe(true);
+  });
+
+  it('stabilizes the terminal on a fresh line before prompt takeover', () => {
+    const writes: string[] = [];
+    const terminal = {
+      input: {
+        isRaw: false,
+        setRawMode() {
+          return;
+        },
+      } as unknown as NodeJS.ReadableStream,
+      output: {
+        write(chunk: string) {
+          writes.push(chunk);
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+    };
+
+    stabilizeTerminalForPrompt(terminal);
+
+    expect(writes).toEqual([getTerminalResetSequence(), '\r\n']);
   });
 });

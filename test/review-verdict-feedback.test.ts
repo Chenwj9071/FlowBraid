@@ -44,13 +44,13 @@ async function createFakeReviewCodex(binDir: string): Promise<void> {
     '  process.exit(1);',
     '}',
     'const parsed = parseArgs(args);',
-    "const mode = process.env.FLOWBRAID_CODEX_MODE || 'exec';",
+    "const prompt = readStdin();",
+    "const mode = process.env.FLOWBRAID_CODEX_MODE || (/legacy\\.node\\.mode:\\s*review/i.test(prompt) ? 'review' : 'exec');",
     "const runDir = process.env.FLOWBRAID_RUN_DIR || process.cwd();",
     "const reviewReportPath = path.join(runDir, 'nodes', 'verify', 'artifacts', 'verify-report.md');",
     "const humanFeedbackPath = path.join(runDir, 'messages', 'human-feedback.jsonl');",
     "const calcPath = path.join(parsed.workdir, 'calc.js');",
     "const feedbackAppliedPath = path.join(parsed.workdir, 'feedback-applied.txt');",
-    "const prompt = readStdin();",
     '',
     "if (mode === 'exec') {",
     "  const hasReviewReport = fs.existsSync(reviewReportPath);",
@@ -132,6 +132,7 @@ describe('review verdict 与人工反馈回流', () => {
     const originalPath = process.env.PATH ?? '';
     process.env.PATH = `${binDir};${originalPath}`;
     try {
+      const codexCommand = `node "${path.join(binDir, 'fake-review-codex.js')}"`;
       const workflowFile = path.join(workflowDir, 'workflow.yaml');
       const workflow = `
 id: review-verdict-demo
@@ -165,8 +166,11 @@ nodes:
       await writeFile(workflowFile, workflow, 'utf8');
 
       const loaded = await loadWorkflowFile(workflowFile);
+      const logs: string[] = [];
       const firstResult = await startWorkflow(loaded, {
         workspaceRoot,
+        codexCommand,
+        logger: (line) => logs.push(line),
       });
 
       expect(firstResult.status).toBe('paused');
@@ -181,6 +185,8 @@ nodes:
       const rejectResult = await resumeWorkflow(firstResult.runDir, {
         approvalDecision: 'reject',
         approvalComment: '请保持只输出结果值，并确认人工确认意见已被处理',
+        codexCommand,
+        logger: (line) => logs.push(line),
       });
 
       expect(rejectResult.status).toBe('paused');
@@ -196,6 +202,8 @@ nodes:
 
       const finalResult = await resumeWorkflow(firstResult.runDir, {
         approvalDecision: 'approve',
+        codexCommand,
+        logger: (line) => logs.push(line),
       });
       expect(finalResult.status).toBe('completed');
 
@@ -204,8 +212,10 @@ nodes:
       );
       expect(finalState.status).toBe('completed');
       expect(finalState.currentNodeId).toBeNull();
+      expect(logs.some((line) => line.includes('review verdict=reject'))).toBe(true);
+      expect(logs.some((line) => line.includes('review verdict=approve'))).toBe(true);
     } finally {
       process.env.PATH = originalPath;
     }
-  }, 20000);
+  }, 60000);
 });

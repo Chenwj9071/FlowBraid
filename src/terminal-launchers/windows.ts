@@ -14,6 +14,7 @@ export function buildWindowsTerminalLaunchCommand(
   const innerCommand = [
     `Set-Location ${quotePowerShell(request.workingDirectory)}`,
     `$host.UI.RawUI.WindowTitle = ${quotePowerShell(request.title)}`,
+    `cmd.exe /d /c title ${request.title}`,
     innerInvocation,
   ].join('; ');
   const commandText = [
@@ -32,10 +33,32 @@ export function buildWindowsTerminalLaunchCommand(
 }
 
 export function buildWindowsTerminalCloseCommand(terminalPid: number): { file: string; args: string[] } {
+  return buildWindowsTerminalCloseCommandWithTitle(terminalPid);
+}
+
+export function buildWindowsTerminalCloseCommandWithTitle(
+  terminalPid: number,
+  title?: string,
+): { file: string; args: string[] } {
+  const titleClose = title ? quotePowerShell(title) : null;
   const commandText = [
     '$ErrorActionPreference = "Stop"',
+    titleClose
+      ? [
+          `$targetTitle = ${titleClose}`,
+          '$matches = @(Get-Process | Where-Object { $_.MainWindowTitle -eq $targetTitle })',
+          'foreach ($match in $matches) { try { [void]$match.CloseMainWindow() } catch { } }',
+          'Start-Sleep -Milliseconds 200',
+        ].join('; ')
+      : '$matches = @()',
     `$p = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue`,
-    `if ($p) { try { & ${quotePowerShell('taskkill.exe')} /PID ${terminalPid} /T /F | Out-Null } catch { } }`,
+    titleClose
+      ? [
+          'if ($p -and $p.MainWindowTitle -eq $targetTitle) {',
+          `  try { taskkill /PID ${terminalPid} /T /F | Out-Null } catch { }`,
+          '}',
+        ].join(' ')
+      : `if ($p) { try { taskkill /PID ${terminalPid} /T /F | Out-Null } catch { } }`,
   ].join('; ');
 
   return {
@@ -59,19 +82,23 @@ export function createWindowsTerminalLauncher(): ExternalTerminalLauncher {
       const stdout = await spawnAndCapture(built.file, built.args);
       return { terminalPid: parseTerminalPid(stdout) };
     },
-    async close(terminalPid: number): Promise<void> {
-      const built = buildWindowsTerminalCloseCommand(terminalPid);
-      await spawnAndCapture(built.file, built.args);
+    async close(terminalPid: number, options?: { timeoutMs?: number; title?: string }): Promise<void> {
+      const built = buildWindowsTerminalCloseCommandWithTitle(terminalPid, options?.title);
+      await spawnAndCapture(built.file, built.args, options?.timeoutMs ?? 5000);
     },
   };
 }
 
-async function spawnAndCapture(file: string, args: string[]): Promise<string> {
+async function spawnAndCapture(file: string, args: string[], timeoutMs = 15000): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(file, args, {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`terminal launcher timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -80,8 +107,12 @@ async function spawnAndCapture(file: string, args: string[]): Promise<string> {
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
-    child.once('error', reject);
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.once('exit', (code) => {
+      clearTimeout(timeout);
       if (code === 0) {
         resolve(stdout);
         return;

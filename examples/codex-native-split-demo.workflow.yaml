@@ -19,7 +19,6 @@ nodes:
 
   develop:
     type: codex
-    mode: exec
     contextDir: ./demo-dev
     workdir: ./demo-workdir
     prompt: |
@@ -51,7 +50,6 @@ nodes:
 
   verify:
     type: codex
-    mode: review
     contextDir: ./demo-verify
     workdir: ./demo-workdir
     prompt: |
@@ -68,14 +66,14 @@ nodes:
       5. calc.js must include at least one clear comment explaining the script purpose or the CLI parsing logic
 
       Decision rules:
-      - If behavior is wrong, verdict must be reject
-      - If behavior is correct but comments are missing, verdict must still be reject
+      - If behavior is wrong, final outcome must be reject
+      - If behavior is correct but comments are missing, final outcome must still be reject
       - Only approve after both behavior and comment requirements are satisfied
 
       Output requirements:
-      - Include one standalone line: verdict: approve or verdict: reject
-      - If reject, explain the exact failure and the concrete fix
-      - If approve, summarize the commands you ran, the outputs, and the comment check result
+      - Write a verification report to the artifact file
+      - If reject, explain the exact failure and the concrete fix, then report `flowbraid node complete --outcome reject`
+      - If approve, summarize the commands you ran, the outputs, and the comment check result, then report `flowbraid node complete --outcome approve`
     outputFile: verify-report.md
     transitions:
       success: approve

@@ -115,8 +115,11 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
     throw new WorkflowError(`shell 节点 ${nodeId} 必须提供 command`);
   }
   if (node.type === 'codex') {
-    if ((node.mode !== 'exec' && node.mode !== 'review') || typeof node.prompt !== 'string' || node.prompt.trim() === '') {
-      throw new WorkflowError(`codex 节点 ${nodeId} 必须提供 mode(exec|review) 和非空 prompt`);
+    if (typeof node.prompt !== 'string' || node.prompt.trim() === '') {
+      throw new WorkflowError(`codex 节点 ${nodeId} 必须提供非空 prompt`);
+    }
+    if (node.mode !== undefined && node.mode !== 'exec' && node.mode !== 'review') {
+      throw new WorkflowError(`codex 节点 ${nodeId} 的 mode 只能是 exec 或 review`);
     }
     if (
       node.reentry &&
@@ -186,4 +189,18 @@ export function resolveApprovalNext(node: WorkflowNodeDefinition, decision: 'app
     return map.reject;
   }
   return null;
+}
+
+export function resolveNodeTransition(node: WorkflowNodeDefinition, keys: string[]): string | null {
+  const map = node.transitions ?? {};
+  for (const key of keys) {
+    const target = map[key];
+    if (typeof target === 'string') {
+      return target;
+    }
+    if (target === null) {
+      return null;
+    }
+  }
+  return resolveNodeNext(node, 'default');
 }

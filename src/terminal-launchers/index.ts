@@ -1,12 +1,13 @@
 import {
   createWindowsTerminalLauncher,
   buildWindowsTerminalCloseCommand,
+  buildWindowsTerminalCloseCommandWithTitle,
   buildWindowsTerminalLaunchCommand,
   parseTerminalPid,
 } from './windows.js';
 import type { ExternalTerminalLauncher } from './types.js';
 
-export { buildWindowsTerminalCloseCommand, buildWindowsTerminalLaunchCommand, parseTerminalPid };
+export { buildWindowsTerminalCloseCommand, buildWindowsTerminalCloseCommandWithTitle, buildWindowsTerminalLaunchCommand, parseTerminalPid };
 export type { ExternalTerminalLaunchRequest, ExternalTerminalLaunchResult, ExternalTerminalLauncher } from './types.js';
 
 export function createExternalTerminalLauncher(platform: NodeJS.Platform = process.platform): ExternalTerminalLauncher {

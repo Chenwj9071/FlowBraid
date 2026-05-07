@@ -42,7 +42,7 @@ nodes:
     await mkdir(path.join(runWorkspace.nodesDir, 'verify', 'artifacts'), { recursive: true });
     await writeFile(
       path.join(runWorkspace.nodesDir, 'verify', 'artifacts', 'verify-report.md'),
-      'verdict: reject\ncomments are missing\n',
+      'outcome hint: reject\ncomments are missing\n',
       'utf8',
     );
     await writeFile(
@@ -79,7 +79,7 @@ nodes:
     expect(prompt).toContain('node fail --run-dir');
     expect(prompt).toContain('node artifact --run-dir');
     expect(prompt).toContain('latest.verify.report:');
-    expect(prompt).toContain('verdict: reject');
+    expect(prompt).toContain('outcome hint: reject');
     expect(prompt).toContain('latest.human.feedback:');
     expect(prompt).toContain('please add a short usage note');
     expect(prompt).toContain('exit the current codex session immediately');
@@ -119,7 +119,7 @@ nodes:
     await mkdir(path.join(runWorkspace.nodesDir, 'verify', 'artifacts'), { recursive: true });
     await writeFile(
       path.join(runWorkspace.nodesDir, 'verify', 'artifacts', 'verify-report.md'),
-      'verdict: reject\ncomments are missing\n',
+      'outcome hint: reject\ncomments are missing\n',
       'utf8',
     );
     await writeFile(

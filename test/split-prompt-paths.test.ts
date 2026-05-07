@@ -44,7 +44,7 @@ async function createPromptAwareCodex(binDir: string): Promise<string> {
     "const latestHumanMatch = prompt.match(/latest\\.human\\.feedback:\\n([\\s\\S]*?)\\n\\nDirectory model:/);",
     "const latestVerify = latestVerifyMatch ? latestVerifyMatch[1].trim() : '';",
     "const latestHuman = latestHumanMatch ? latestHumanMatch[1].trim() : '';",
-    "const mode = process.env.FLOWBRAID_CODEX_MODE || 'exec';",
+    "const mode = process.env.FLOWBRAID_CODEX_MODE || (/legacy\\.node\\.mode:\\s*review/i.test(prompt) ? 'review' : 'exec');",
     "const calcPath = path.join(parsed.workdir, 'calc.js');",
     "if (mode === 'exec') {",
     "  const hasVerifyReport = latestVerify.includes('verdict: reject') || latestVerify.includes('missing comments');",

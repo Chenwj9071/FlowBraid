@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWindowsTerminalLaunchCommand,
   buildWindowsTerminalCloseCommand,
+  buildWindowsTerminalCloseCommandWithTitle,
   createExternalTerminalLauncher,
   parseTerminalPid,
 } from '../src/terminal-launchers/index.js';
@@ -23,6 +24,7 @@ describe('external terminal launcher', () => {
     expect(commandText).toContain('dist/cli.js');
     expect(commandText).toContain('--node-id');
     expect(commandText).toContain('develop');
+    expect(commandText).toContain('cmd.exe /d /c title FlowBraid develop');
     expect(commandText).not.toContain('MainWindowTitle');
   });
 
@@ -98,12 +100,13 @@ describe('external terminal launcher', () => {
     expect(commandText).toContain('/PID 76096');
   });
 
-  it('builds a close command that swallows taskkill failures after the close attempt', () => {
-    const built = buildWindowsTerminalCloseCommand(76096);
+  it('builds a close command that still falls back to pid-based closing', () => {
+    const built = buildWindowsTerminalCloseCommandWithTitle(76096, 'FlowBraid native develop [attempt-1]');
 
     const commandText = built.args[built.args.indexOf('-Command') + 1];
-    expect(commandText).toContain('try');
-    expect(commandText).toContain('catch');
-    expect(commandText).toContain('taskkill');
+    expect(commandText).toContain('MainWindowTitle');
+    expect(commandText).toContain('$targetTitle = \'FlowBraid native develop [attempt-1]\'');
+    expect(commandText).toContain('CloseMainWindow()');
+    expect(commandText).toContain('taskkill /PID 76096 /T /F');
   });
 });
