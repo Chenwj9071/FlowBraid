@@ -108,7 +108,6 @@ prepare:
 ```yaml
 develop:
   type: codex
-  mode: exec
   contextDir: ./demo-dev
   workdir: ./demo-workdir
   prompt: |
@@ -119,11 +118,39 @@ develop:
     failure: verify
 ```
 
-- `mode` 只能是 `exec` 或 `review`。
 - `prompt` 必填。
 - `outputFile` 默认是 `codex-last-message.md`。
-- `mode: exec` 用于开发、修复、生成。
-- `mode: review` 用于验收和审查，结果依赖 `verdict: approve` / `verdict: reject`。
+- `model` 可选，用于覆盖默认模型。
+- `reentry.mode` 可选，用于控制回流时如何恢复该节点历史会话。
+- 当前推荐把 `codex` 节点写成“任务 + outcome 上报”模型，而不是依赖自然语言 `verdict` 解析。
+
+### 完成协议
+
+当前推荐写法下，`codex` 节点应把以下内容写进 `prompt`：
+- 明确要求在任务完成后调用 `flowbraid node complete --outcome ...`
+- 明确要求失败时调用 `flowbraid node fail`
+
+推荐 outcome：
+- `success`：普通任务完成，通常流向 `transitions.success` 或 `next`
+- `approve`：验收/审核通过，通常也视为成功分支
+- `reject`：验收/审核打回，通常映射到失败分支或回流分支
+
+调度器当前会优先读取：
+- `nodes/<node-id>/state/runtime-state.json`
+- 当前 attempt 的最新 outcome 事件
+
+因此推荐把“节点是否完成、走哪条分支”的真源建立在 runtime-state + outcome 上，而不是只靠子进程退出码或自然语言结果。
+
+### `mode` 兼容字段
+
+`mode` 目前仍被实现层接受，但它已经不是推荐主路径：
+- `mode: exec`：兼容旧的开发/生成语义
+- `mode: review`：兼容旧的 review/verdict 语义
+
+兼容说明：
+- 旧 workflow 仍可继续运行
+- 新 workflow 不建议再围绕 `mode: review + verdict: approve|reject` 设计主流程
+- 新示例应优先使用显式 outcome 协议
 
 ### `reentry`
 
@@ -132,7 +159,6 @@ develop:
 ```yaml
 develop:
   type: codex
-  mode: exec
   prompt: |
     Implement the task.
   reentry:
@@ -221,6 +247,11 @@ done:
 1. `approve` 走 `transitions.approve`
 2. `reject` 走 `transitions.reject`
 
+对 `codex` 节点，推荐把分支理解为“最终 outcome 映射”：
+- `success` / `approve` 通常进入成功分支
+- `reject` / `failure` 通常进入失败分支
+- 如果节点只是暂停或等待人工动作，不应提前上报完成 outcome
+
 ## 13. 推荐编排模式
 
 ```yaml
@@ -236,21 +267,25 @@ nodes:
 
   develop:
     type: codex
-    mode: exec
     contextDir: ./demo-dev
     workdir: ./demo-workdir
     prompt: |
       Implement the task.
+      When finished, report the final result with:
+      `flowbraid node complete --outcome success`
     next: verify
 
   verify:
     type: codex
-    mode: review
     contextDir: ./demo-verify
     workdir: ./demo-workdir
     prompt: |
       Verify the task.
-      Output verdict: approve or verdict: reject.
+      Write the verification report to the artifact path.
+      If verification fails, report:
+      `flowbraid node complete --outcome reject`
+      If verification passes, report:
+      `flowbraid node complete --outcome approve`
     transitions:
       success: approve
       failure: develop
@@ -265,12 +300,19 @@ nodes:
     type: end
 ```
 
+这个模式体现的是：
+- `develop` 负责产出共享业务修改
+- `verify` 负责真正执行验证并给出显式 outcome
+- `approval` 负责最终人工确认
+- 回流依赖显式状态和结构化反馈，而不是隐式约定
+
 ## 14. 常见错误
 
 - `start` 指向不存在节点。
 - `approval` 缺少 `approve` 或 `reject`。
 - `agent_session` 误用 `resume`。
-- `review` 节点不输出 `verdict:`。
+- `codex` 节点 prompt 没有明确要求上报 `flowbraid node complete --outcome ...`。
+- 新 workflow 仍把 `mode: review` 和 `verdict:` 当成唯一完成协议。
 - 把 `contextDir` 当作真实业务目录。
 - 在单行 YAML 里硬塞复杂 shell 命令。
 - 没有失败分支却期待自动回流。
@@ -280,7 +322,8 @@ nodes:
 - 每个节点只做一种职责。
 - 开发和验收用不同 `contextDir`。
 - 共享真实业务目录时统一放到 `workdir`。
-- `review` 节点明确要求输出 `verdict:`。
+- `codex` 节点 prompt 里显式写清 complete、fail 两类终态命令触发条件。
+- 验证类节点把报告文件和最终 outcome 一起产出，避免只有自然语言结论。
 - `approval reject` 的 prompt 要明确要求人工给出具体意见。
 - 中途对话任务用 `agent_session`。
 - 一次性准备脚本用 `shell`。
@@ -316,7 +359,9 @@ workspace: D:\Code\FlowBraid\examples\.flowbraid-runs\20260506-123456-abcdef
 ## 18. 运行产物
 
 - `state/run.json`：run 总状态。
+- `state/timeline.json`：按 step / attempt 记录的时间线。
 - `nodes/<node-id>/status.json`：单节点状态。
+- `nodes/<node-id>/state/runtime-state.json`：节点运行态真源，包含 status、outcome、summary、attemptId 等。
 - `messages/events.jsonl`：全局事件流。
 - `messages/human-feedback.jsonl`：审批反馈。
 - `nodes/<node-id>/artifacts/`：节点输出产物。

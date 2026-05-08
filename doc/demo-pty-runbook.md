@@ -5,7 +5,7 @@
 这个示例用于演示一条真实的 PTY 交互式工作流：
 
 1. `develop` 首次提交一个功能正确但没有注释的 `calc.js`
-2. `verify` 实际运行脚本，并因“缺少注释”给出 `verdict: reject`
+2. `verify` 实际运行脚本，并因“缺少注释”给出 `outcome: reject`
 3. `develop` 读取验收报告后补充注释并重新提交
 4. `verify` 再次验收通过
 5. 流程进入人工审批节点
@@ -45,9 +45,9 @@ approve
   - `node calc.js 1 2`
   - `node calc.js 10 -4`
   - `node calc.js 1.5 2.5`
-- 首次验收出现 `verdict: reject`
+- 首次验收出现 `outcome: reject`
 - 失败原因明确指出“缺少注释”
-- 第二次验收出现 `verdict: approve`
+- 第二次验收出现 `outcome: approve`
 - 审批节点提示 `审批结果 [approve/reject]:`
 - 最终出现 `run <id> => completed`
 

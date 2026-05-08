@@ -42,6 +42,7 @@ import { appendAgentSessionMessage, getAgentSessionPaths, readAgentSessionMessag
 import { runCodexSessionTurn } from './session-providers/codex.js';
 import { createExternalTerminalLauncher } from './terminal-launchers/index.js';
 import { buildCodexPrompt } from './codex-prompt.js';
+import type { CodexPromptReentryContext } from './codex-prompt.js';
 import {
   appendNativeNodeEvent,
   getNativeSessionPath,
@@ -475,7 +476,11 @@ export class FlowBraidEngine {
     const dirs = this.resolveNodeDirectories(node);
     const cwd = resolveRelative(this.workflow.directory, node.cwd) ?? dirs.contextDir;
     const outputFile = path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md');
-    const prompt = buildCodexPrompt(this.workflow, nodeId, state.currentAttemptId ?? createAttemptId(), node, nodeDir, nodeArtifactsDir, workspace, dirs);
+    const attemptId = state.currentAttemptId ?? createAttemptId();
+    const reentryContext = await this.buildCodexReentryContext(workspace, nodeId, attemptId, node);
+    const prompt = buildCodexPrompt(this.workflow, nodeId, attemptId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
+      reentryContext: reentryContext ?? undefined,
+    });
     return runCodexTask({
       command: this.options.codexCommand,
       cwd,
@@ -516,11 +521,13 @@ export class FlowBraidEngine {
     const sessionPath = getNativeSessionPath(nodeDir);
     const previousSession = await this.readResumableNativeSession(nodeDir);
     const reentryMode = this.resolveCodexReentryMode(node, previousSession);
+    const reentryContext = await this.buildCodexReentryContext(workspace, nodeId, attemptId, node, previousSession);
     const prompt = buildCodexPrompt(this.workflow, nodeId, attemptId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
       protocolMode: 'native-split',
       resumeSession: reentryMode === 'resume',
       reentryMode,
       includeReentryHistory: reentryMode !== 'new',
+      reentryContext: reentryContext ?? undefined,
     });
     const invocation = reentryMode === 'resume'
       ? buildNativeCodexResumeInvocation({
@@ -1052,6 +1059,57 @@ export class FlowBraidEngine {
     } catch {
       return null;
     }
+  }
+
+  private async buildCodexReentryContext(
+    workspace: RunWorkspace,
+    nodeId: string,
+    attemptId: string,
+    node: CodexNodeDefinition,
+    previousSession: NativeSessionState | null = null,
+  ): Promise<CodexPromptReentryContext | null> {
+    const timeline = await loadRunTimeline(workspace);
+    const currentIndex = timeline.findIndex((entry) => entry.attemptId === attemptId);
+    if (currentIndex <= 0) {
+      return null;
+    }
+
+    const hasPriorSameNode = timeline.slice(0, currentIndex).some((entry) => entry.nodeId === nodeId);
+    if (!hasPriorSameNode) {
+      return null;
+    }
+
+    const previousEntry = timeline[currentIndex - 1];
+    if (!previousEntry) {
+      return null;
+    }
+
+    const sourceNode = this.workflow.nodes[previousEntry.nodeId];
+    const sourceNodeType = sourceNode?.type;
+    let reason = previousEntry.detail ?? `${previousEntry.nodeId} ${previousEntry.status}`;
+    if (sourceNodeType === 'approval') {
+      reason = previousEntry.detail ? `approval returned ${previousEntry.detail}` : 'approval requested a loopback';
+    } else if (sourceNodeType === 'gate') {
+      reason = previousEntry.detail ? `gate released with ${previousEntry.detail}` : 'gate resumed this node';
+    } else if (sourceNodeType === 'codex') {
+      reason = previousEntry.detail ? `previous codex step ended with ${previousEntry.detail}` : 'previous codex step looped back';
+    }
+
+    if (previousSession?.status === 'completed' && previousSession.result?.reason) {
+      reason = previousSession.result.reason;
+    }
+
+    const requiredAction =
+      node.mode === 'review'
+        ? 'Use the current review inputs, update the report or verdict artifact as needed, and then report the final node outcome with the required FlowBraid command.'
+        : 'Apply the re-entry feedback to the shared deliverable, write any required artifact, and then report the final node outcome with the required FlowBraid command.';
+
+    return {
+      fromNodeId: previousEntry.nodeId,
+      fromNodeType: sourceNodeType,
+      reason,
+      requiredAction,
+    };
   }
 
   private resolveNodeNextFromRuntime(node: CodexNodeDefinition, runtimeState: NodeRuntimeState): string | null {

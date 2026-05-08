@@ -19,7 +19,7 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 - `node`：一个运行单元，当前支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end`。
 - `transition`：节点执行结果对应的下一跳。
 - `gate`：人工确认或门禁节点，会阻断流程并等待 `resume`。
-- `codex`：调用本地 `Codex CLI` 的任务型节点，支持开发和 code review 两种模式。
+- `codex`：调用本地 `Codex CLI` 的任务型节点，推荐通过显式 outcome 协议上报执行结果。
 - `agent_session`：长期交互 agent 节点，当前先支持 `provider: codex`，节点完成由结构化会话结果决定。
 - `approval`：人工审批节点，`resume` 时通过 `approve` / `reject` 决定下一跳。
 
@@ -41,6 +41,7 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 ## 目录模型
 - `run/`：一次工作流运行的根目录。
 - `state/`：运行时状态文件。
+- `state/timeline.json`：按 step / attempt 记录的运行时间线。
 - `nodes/<node-id>/`：节点独立目录。
 - `artifacts/`：节点输出产物。
 - `messages/`：节点间消息箱。
@@ -48,6 +49,7 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 - `nodes/<node-id>/messages/inbox.jsonl`：会话型节点的 system / user 输入。
 - `nodes/<node-id>/messages/outbox.jsonl`：会话型节点的 assistant 回复和结构化事件。
 - `nodes/<node-id>/state/session.json`：会话型节点的会话状态。
+- `nodes/<node-id>/state/runtime-state.json`：任务型节点运行态真源，记录 status、outcome、summary、attemptId 等信息。
 - 默认情况下，workflow 文件所在目录就是默认工作目录，运行时 workspace 也落在该目录下。
 
 ## 门禁、回流与会话继续
@@ -59,6 +61,8 @@ FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续�
 - 当节点执行失败但声明了 `transitions.failure` 时，调度器应按失败分支继续流转，而不是直接结束整个 run。
 - 会话型节点暂停时，不通过 `resume` 恢复，而是通过 `send` 向当前节点继续发送输入。
 - 人工审批 `reject` 时应支持记录结构化反馈，供后续节点读取和处理。
+- 对任务型 `codex` 节点，推荐由节点显式上报最终 outcome，再由调度器基于 outcome 决定成功分支或失败分支。
+- 对会回流的 `codex` 节点，新的 prompt 约定应显式暴露验证报告和人工反馈路径，避免依赖隐式文件约定。
 
 ## 监控要求
 - 终端实时输出节点日志。

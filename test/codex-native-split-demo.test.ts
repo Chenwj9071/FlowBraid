@@ -37,7 +37,9 @@ describe('codex native split demo', () => {
           expect(request.args[0]).toBe('resume');
           expect(request.args[1]).toBe(expectedSessionId);
           expect(request.args).not.toContain('--last');
-          expect(request.args.at(-1)).toContain('Continue the existing development session');
+          expect(request.args.at(-1)).toContain('FlowBraid node protocol:');
+          expect(request.args.at(-1)).toContain('Re-entry context:');
+          expect(request.args.at(-1)).toContain('Command triggers:');
         }
         setTimeout(async () => {
           const runDirs = await readDirNames(workspaceRoot);

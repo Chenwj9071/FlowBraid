@@ -4,7 +4,7 @@
 FlowBraid 当前拆成四层：
 - 工作流定义层：读取、解析、校验 workflow 文件。
 - 调度层：驱动节点执行，处理暂停、审批、回流、`resume` 和 `send`。
-- 执行器与 provider 层：负责真正拉起 `shell`、`codex exec`，以及会话型 provider 的单次 turn。
+- 执行器与 provider 层：负责真正拉起 `shell`、`codex` 任务节点，以及会话型 provider 的单次 turn。
 - 运行时存储层：负责 run workspace、状态文件、消息箱、日志和产物。
 
 ## 关键模块
@@ -30,7 +30,9 @@ FlowBraid 当前拆成四层：
 
 ### 4. Executors And Providers
 - `shell` 执行器负责一次性本地命令。
-- `codex` 任务节点负责短生命周期的 `codex exec`，完成判定仍然依赖子进程退出码或 review verdict。
+- `codex` 任务节点负责短生命周期任务，推荐通过 `flowbraid node complete|fail` 把结果写回运行态。
+- 调度器优先读取当前 attempt 的 `runtime-state.json` 和 outcome 事件决定 `codex` 节点流转。
+- 旧的 `mode: review` / `verdict` 解析仍保留兼容层，但不再是推荐主路径。
 - `codex` 的开发模式在交互运行时通过 PTY 直通当前终端，输入输出都走同一条 terminal 通道。
 - Windows 下的 PTY 交互链路会先切到 UTF-8 控制台，再启动 `codex`，减少中文角色文档和人工输入的乱码问题。
 - `agent_session` 节点不再把“进程退出”当作节点完成信号，而是调用 provider 做一次 turn，消费完整会话历史并返回结构化结果。
@@ -38,7 +40,9 @@ FlowBraid 当前拆成四层：
 
 ### 5. State And Messaging
 - `state/run.json`：run 级状态。
+- `state/timeline.json`：按节点 step / attempt 持久化的时间线。
 - `nodes/<node-id>/status.json`：节点级状态。
+- `nodes/<node-id>/state/runtime-state.json`：任务型节点运行态，包含 status、outcome、summary、attemptId、terminalPid 等。
 - `messages/events.jsonl`：全局运行事件。
 - `messages/human-feedback.jsonl`：人工审批的 reject / approve 结果和反馈意见。
 - `nodes/<node-id>/messages/inbox.jsonl`：会话节点的 system / user 输入。
@@ -61,15 +65,18 @@ FlowBraid 当前拆成四层：
 3. 以 workflow 文件所在目录作为默认工作目录，并在该目录下创建 run workspace。
 4. 从 `start` 节点开始执行。
 5. `shell` 节点运行完成后进入下一跳。
-6. `codex` 任务节点调用本地 `codex exec`，子进程退出后由调度器判断成功或失败。
-7. `agent_session` 节点会先读取完整会话历史，再调用 provider 做一次 turn。
-8. 如果 turn 结果是 `waiting_input`，run 进入 `paused`，当前节点保持不变，等待 `flowbraid send` 或交互模式下继续输入。
-9. 如果 turn 结果是 `completed`，调度器按 `next` / `transitions.success` 流转到下一个节点。
-10. `approval` 节点在 `resume` 时消费 `approve` / `reject` 决策。
-11. 遇到 `end` 节点后结束运行。
+6. `codex` 任务节点启动后，在 prompt 中获得明确的 complete / fail 上报协议。
+7. 调度器优先读取当前 attempt 的 `runtime-state` 与 outcome 事件决定成功、失败或暂停。
+8. 兼容路径下，如未拿到 runtime-state 终态，调度器才回退到旧的退出码或 `review verdict` 解析。
+9. `agent_session` 节点会先读取完整会话历史，再调用 provider 做一次 turn。
+10. 如果 turn 结果是 `waiting_input`，run 进入 `paused`，当前节点保持不变，等待 `flowbraid send` 或交互模式下继续输入。
+11. 如果 turn 结果是 `completed`，调度器按 `next` / `transitions.success` 流转到下一个节点。
+12. `approval` 节点在 `resume` 时消费 `approve` / `reject` 决策。
+13. 遇到 `end` 节点后结束运行。
 
 ## 当前设计取舍
 - `codex` 任务节点和 `agent_session` 节点并存，而不是强行合并。这是为了避免把短任务语义和长期会话语义混在一个退出协议里。
+- `codex` 主路径优先使用通用 outcome 协议，而不是把 review 专用语义扩散到所有任务节点。
 - 会话型节点优先走文件协议和结构化结果，不靠解析自然语言输出猜测“任务是否完成”。
 - PTY 只用于提升交互体验，不承担节点完成判定职责。
 - 正式示例优先使用英文角色提示和本地 demo 文档，以降低 Windows PTY 下中文输出乱码的概率。

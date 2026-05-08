@@ -73,16 +73,20 @@ nodes:
       },
     );
 
+    expect(prompt).toContain('FlowBraid node protocol:');
+    expect(prompt).toContain('Command triggers:');
     expect(prompt).toContain('Native split terminal protocol:');
     expect(prompt).toContain('node complete --run-dir');
     expect(prompt).toContain('--attempt-id "attempt-develop-1"');
     expect(prompt).toContain('node fail --run-dir');
-    expect(prompt).toContain('node artifact --run-dir');
     expect(prompt).toContain('latest.verify.report:');
     expect(prompt).toContain('outcome hint: reject');
     expect(prompt).toContain('latest.human.feedback:');
     expect(prompt).toContain('please add a short usage note');
+    expect(prompt).toContain('Exit the session immediately only after reporting a final complete or fail state.');
     expect(prompt).toContain('exit the current codex session immediately');
+    expect(prompt).not.toContain('After any terminal command, stop working and exit the session immediately.');
+    expect(prompt).not.toContain('node artifact --run-dir');
   });
 
   it('uses a dedicated re-entry prompt for resumed native split sessions', async () => {
@@ -148,14 +152,22 @@ nodes:
       {
         protocolMode: 'native-split',
         resumeSession: true,
+        reentryContext: {
+          fromNodeId: 'approve',
+          fromNodeType: 'approval',
+          reason: 'approval returned decision=reject',
+          requiredAction: 'apply the recorded feedback and report the node result with the required FlowBraid command',
+        },
       },
     );
 
-    expect(prompt).toContain('Continue the existing development session');
+    expect(prompt).toContain('FlowBraid node protocol:');
     expect(prompt).toContain('Re-entry context:');
-    expect(prompt).toContain('Do not ask for the original task again');
+    expect(prompt).toContain('from:');
+    expect(prompt).toContain('reason:');
+    expect(prompt).toContain('required action:');
     expect(prompt).toContain('please add a brief usage note');
-    expect(prompt).not.toContain(`Task:\n${originalTask}`);
+    expect(prompt).toContain(`Task:\n${originalTask}`);
   });
 
   it('supports minimal re-entry prompt without historical context', async () => {
@@ -210,8 +222,8 @@ nodes:
       },
     );
 
-    expect(prompt).toContain('Continue the existing development session');
-    expect(prompt).toContain('Re-entry context is intentionally minimal for this round.');
+    expect(prompt).toContain('FlowBraid node protocol:');
+    expect(prompt).not.toContain('Re-entry context:');
     expect(prompt).not.toContain('latest.verify.report:');
     expect(prompt).not.toContain('latest.human.feedback:');
   });

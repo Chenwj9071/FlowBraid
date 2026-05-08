@@ -11,7 +11,7 @@
 - Execute verification commands inside `workdir`.
 - Prefer files inside `workdir/doc/` over repository-root docs for this demo.
 - You must actually run the script
-- You must return either `verdict: approve` or `verdict: reject`
+- Report the final result through `flowbraid node complete --outcome approve|reject`
 - If the result is reject, you must provide a concrete fix
 
 ## Required checks
@@ -23,3 +23,4 @@
 
 ## Important
 - Correct behavior without comments is still a reject
+- Write the verification report to `verify.report.path`

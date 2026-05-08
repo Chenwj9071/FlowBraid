@@ -24,6 +24,7 @@ nodes:
     prompt: |
       You are the development node. Read AGENTS.md in the current directory first, then implement the task.
       Do the real work inside workdir, not inside the current directory.
+      Treat runtime-state plus outcome as the source of truth for node completion.
 
       Goal:
       1. Create or update calc.js in the current workdir
@@ -65,6 +66,7 @@ nodes:
     prompt: |
       You are the verification node. Read AGENTS.md in the current directory first, then verify the deliverable.
       Run verification commands inside workdir, not inside the current directory.
+      Treat runtime-state plus outcome as the source of truth for node completion.
 
       You must actually run calc.js in the current workdir.
 
@@ -81,7 +83,7 @@ nodes:
       - Only approve after both behavior and comment requirements are satisfied
 
       Output requirements:
-      - Write a verification report to the artifact file
+      - Write a verification report to verify.report.path
       - If reject, explain the exact failure and the concrete fix, then report `flowbraid node complete --outcome reject`
       - If approve, summarize the commands you ran, the outputs, and the comment check result, then report `flowbraid node complete --outcome approve`
     outputFile: verify-report.md

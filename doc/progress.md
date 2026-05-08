@@ -12,7 +12,7 @@
 - 已完成 workflow 解析、状态落盘、`shell` 执行器、`codex` 任务执行器和 CLI 调度
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点
 - 已支持 `run`、`resume`、`send` 的基本运行闭环
-- `codex` 主路径已开始迁移到通用 `runtime-state + outcome` 状态协议，主示例和 native split 已优先按新协议流转
+- `codex` 主路径已迁移到通用 `runtime-state + outcome` 状态协议，主示例和 native split 已优先按新协议流转
 - `codex review` 已支持读取 `verdict: approve|reject` 自动走 success / failure 分支
 - `agent_session` 已改为长期会话模型，节点完成由结构化 turn 结果决定
 - 已支持 `contextDir` / `workdir` 双目录模型
@@ -22,8 +22,10 @@
 - 已支持 `terminalCloseGraceMs`，native split 终态后会延时收尾，再请求关闭终端
 - Windows native split 关窗已改为标题优先 + PID 兜底，并在关闭请求中携带 `attemptId` 标题，避免只靠 PID 竞态关错窗
 - 已补齐 Windows 终端 prompt 清理与重置序列，降低 PTY / native split 切换后残留光标状态和控制序列干扰
-- `codex-native-split-demo` 已补入 `review` 人工审核节点，形成 develop -> review -> verify -> approval 的更完整回流闭环
+- 主示例已收敛为 develop -> verify -> approval 的 outcome 驱动回流闭环
 - CLI 交互式输出已切换为统一行写入器，避免 approval / resume / send 之后的 scheduler 日志粘行或覆盖前一行
+- `codex` 提示词已从角色化约束收敛为流程协议约束，回流时显式注入来源、原因和必需动作，终态命令触发条件也已改为强约束表述
+- 已新增 `development-experience-and-pitfalls.md`，归档本轮开发、设计和编码问题的避坑指南，并提炼可执行规范
 
 ## 已完成里程碑
 1. 冻结需求、架构和技术选型文档
@@ -51,7 +53,7 @@
 - `npm test` 通过
 - 示例 workflow 可在 `examples/` 目录直接运行
 - `agent_session` 已覆盖“等待输入 -> send -> 完成”闭环测试
-- `codex review` 自动分支与人工反馈回流已有自动化测试
+- `codex review` 兼容分支与人工反馈回流已有自动化测试
 - `codex` 通用 outcome 协议已有自动化测试，覆盖：
   - `success / approve / reject`
   - native split 回流恢复
@@ -83,6 +85,7 @@
   - `--outcome approve`
   - `--outcome reject`
 - 主示例 `examples/codex-native-split-demo.workflow.yaml`、`examples/codex-pty-demo.workflow.yaml` 已切到新协议说明
+- `workflow-authoring.md` 已更新为 outcome 主路径写法，`mode: exec|review` 仅保留兼容说明
 - 新增 `terminalCloseGraceMs`，native split 收到终态后默认等待 `1500ms` 再请求关闭终端
 - Windows 终端关闭命令新增 `AbortSignal` 兜底，主进程超时后可中断关闭子进程
 - 交互式 CLI 的主调度日志与收尾状态输出改为显式清行 + CRLF 写入，提升 Windows 下 approval 后的光标稳定性

@@ -604,10 +604,11 @@ nodes:
     const resumedDevelopLaunch = launchedRequests.filter((request) => request.title.includes('develop'))[1];
     expect(resumedDevelopLaunch.command).toBe('codex');
     expect(resumedDevelopLaunch.args[0]).not.toBe('resume');
-    expect(resumedDevelopLaunch.args.at(-1)).not.toContain('Continue the existing development session');
-    expect(resumedDevelopLaunch.args.at(-1)).not.toContain('Start a new development session with the existing history');
-    expect(resumedDevelopLaunch.args.at(-1)).not.toContain('Re-entry context:');
-    expect(resumedDevelopLaunch.args.at(-1)).toContain('You are a development agent node.');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('Re-entry context:');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('from:');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('reason:');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('FlowBraid node protocol:');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('Command triggers:');
   }, 15000);
 
   it('does not adopt another node session id from the shared workdir when the current node did not report one', async () => {
