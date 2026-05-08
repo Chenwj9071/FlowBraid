@@ -20,7 +20,6 @@ import {
 } from './native-session.js';
 import { appendNodeRuntimeEvent, getNodeRuntimeStatePath, readNodeRuntimeState, writeNodeRuntimeState } from './node-runtime.js';
 import type { NativeSessionResult, NativeSessionState, NodeRuntimeState, NodeState, RunTimelineEntry } from './types.js';
-import * as readline from 'node:readline';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
@@ -55,25 +54,17 @@ function resolveCodexCommand(flags: Record<string, string | boolean>): string | 
 }
 
 function prepareConsoleForPromptOutput(): void {
-  // Windows PowerShell / Windows Terminal 在某些情况下会保留前一段输出的 \r 覆盖行为，
-  // 导致后续 logger 输出被“贴”到提示符后面。这里在进入 prompt 前明确换到新行并清理当前行。
   try {
-    if (process.stdout.isTTY) {
-      readline.clearLine(process.stdout, 0);
-      readline.cursorTo(process.stdout, 0);
+    if (process.stderr.isTTY) {
+      process.stderr.write('\r\n');
     }
   } catch {
     // best-effort only
   }
-  stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
 }
 
 function writeStdoutLine(text: string): void {
   try {
-    if (process.stdout.isTTY) {
-      readline.clearLine(process.stdout, 0);
-      readline.cursorTo(process.stdout, 0);
-    }
     process.stdout.write(`${text}\r\n`);
   } catch {
     console.log(text);
@@ -94,11 +85,11 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
     throw new Error('current paused node is not approval');
   }
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     while (true) {
       const answer = await Promise.race([
-        rl.question('审批结果 [approve/reject]: '),
+        rl.question('瀹℃壒缁撴灉 [approve/reject]: '),
         createAbortPromise(abortSignal, () => rl.close()),
       ]);
       const normalized = answer.trim().toLowerCase();
@@ -106,7 +97,7 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
         if (normalized === 'reject') {
           while (true) {
             const feedback = await Promise.race([
-              rl.question('请输入打回意见: '),
+              rl.question('璇疯緭鍏ユ墦鍥炴剰瑙? '),
               createAbortPromise(abortSignal, () => rl.close()),
             ]);
             const trimmed = feedback.trim();
@@ -129,10 +120,10 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
 
 async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
   prepareConsoleForPromptOutput();
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     if (promptText) {
-      console.log(promptText);
+      process.stderr.write(`${promptText}\r\n`);
     }
     const answer = await Promise.race([
       rl.question('press Enter to continue, or q to quit: '),
@@ -148,7 +139,7 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
 
 async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<string> {
   prepareConsoleForPromptOutput();
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     return await Promise.race([rl.question('agent> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
@@ -158,7 +149,7 @@ async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<str
 
 async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
   prepareConsoleForPromptOutput();
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     return await Promise.race([rl.question('message> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
@@ -893,10 +884,10 @@ function createAbortPromise(abortSignal: AbortSignal | undefined, cleanup?: () =
 }
 
 async function settleTerminalAfterPrompt(): Promise<void> {
-  // Prompt 返回后只做最小换行，避免 Windows 终端在再次 reset 时
-  // 把后续 scheduler / logger 输出粘到同一行。
   try {
-    process.stdout.write('\r\n');
+    if (process.stderr.isTTY) {
+      process.stderr.write('\r\n');
+    }
   } catch {
     // Ignore best-effort line separation failures.
   }
@@ -905,7 +896,7 @@ async function settleTerminalAfterPrompt(): Promise<void> {
 
 function finishPromptLine(): void {
   try {
-    process.stdout.write('\r\n');
+    process.stderr.write('\r\n');
   } catch {
     // Ignore best-effort line separation failures.
   }
@@ -935,3 +926,4 @@ if (isDirectExecution) {
     process.exit(code);
   });
 }
+
