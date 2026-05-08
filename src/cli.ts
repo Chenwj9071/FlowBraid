@@ -89,7 +89,7 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
   try {
     while (true) {
       const answer = await Promise.race([
-        rl.question('瀹℃壒缁撴灉 [approve/reject]: '),
+        rl.question('审批结果 [approve/reject]: '),
         createAbortPromise(abortSignal, () => rl.close()),
       ]);
       const normalized = answer.trim().toLowerCase();
@@ -97,7 +97,7 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
         if (normalized === 'reject') {
           while (true) {
             const feedback = await Promise.race([
-              rl.question('璇疯緭鍏ユ墦鍥炴剰瑙? '),
+              rl.question('请输入打回意见: '),
               createAbortPromise(abortSignal, () => rl.close()),
             ]);
             const trimmed = feedback.trim();
@@ -105,13 +105,13 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
               finishPromptLine();
               return { decision: normalized, comment: trimmed };
             }
-            console.log('reject 时必须提供打回意见');
+            process.stderr.write('reject requires a comment\r\n');
           }
         }
         finishPromptLine();
         return { decision: normalized };
       }
-      console.log('请输入 approve 或 reject');
+      process.stderr.write('please enter approve or reject\r\n');
     }
   } finally {
     rl.close();
