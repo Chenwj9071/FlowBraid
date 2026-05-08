@@ -23,6 +23,7 @@
 - Windows native split 关窗已改为标题优先 + PID 兜底，并在关闭请求中携带 `attemptId` 标题，避免只靠 PID 竞态关错窗
 - 已补齐 Windows 终端 prompt 清理与重置序列，降低 PTY / native split 切换后残留光标状态和控制序列干扰
 - `codex-native-split-demo` 已补入 `review` 人工审核节点，形成 develop -> review -> verify -> approval 的更完整回流闭环
+- CLI 交互式输出已切换为统一行写入器，避免 approval / resume / send 之后的 scheduler 日志粘行或覆盖前一行
 
 ## 已完成里程碑
 1. 冻结需求、架构和技术选型文档
@@ -84,6 +85,7 @@
 - 主示例 `examples/codex-native-split-demo.workflow.yaml`、`examples/codex-pty-demo.workflow.yaml` 已切到新协议说明
 - 新增 `terminalCloseGraceMs`，native split 收到终态后默认等待 `1500ms` 再请求关闭终端
 - Windows 终端关闭命令新增 `AbortSignal` 兜底，主进程超时后可中断关闭子进程
+- 交互式 CLI 的主调度日志与收尾状态输出改为显式清行 + CRLF 写入，提升 Windows 下 approval 后的光标稳定性
 - 为每次节点进入生成唯一 `attemptId`，并写入：
   - `state/run.json.currentAttemptId`
   - `nodes/<node-id>/status.json.attemptId`

@@ -68,6 +68,18 @@ function prepareConsoleForPromptOutput(): void {
   stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
 }
 
+function writeStdoutLine(text: string): void {
+  try {
+    if (process.stdout.isTTY) {
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+    }
+    process.stdout.write(`${text}\r\n`);
+  } catch {
+    console.log(text);
+  }
+}
+
 async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal): Promise<{ decision: 'approve' | 'reject'; comment?: string }> {
   prepareConsoleForPromptOutput();
   const { workspace, manifest } = await loadManifest(runDir);
@@ -172,7 +184,7 @@ async function runInteractiveWorkflow(
     nativeSplitTerminals: options.nativeSplitTerminals,
     abortSignal: options.abortSignal,
     interactiveTerminal: { input: process.stdin, output: process.stdout },
-    logger: (line) => console.log(line),
+    logger: writeStdoutLine,
   });
   options.onRunDir?.(result.runDir);
 
@@ -196,7 +208,7 @@ async function runInteractiveWorkflow(
         nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
-        logger: (line) => console.log(line),
+        logger: writeStdoutLine,
       });
       options.onRunDir?.(result.runDir);
       continue;
@@ -210,7 +222,7 @@ async function runInteractiveWorkflow(
         nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
-        logger: (line) => console.log(line),
+        logger: writeStdoutLine,
       });
       options.onRunDir?.(result.runDir);
       continue;
@@ -230,7 +242,7 @@ async function runInteractiveWorkflow(
         nativeSplitTerminals: options.nativeSplitTerminals,
         abortSignal: options.abortSignal,
         interactiveTerminal: { input: process.stdin, output: process.stdout },
-        logger: (line) => console.log(line),
+        logger: writeStdoutLine,
       });
       options.onRunDir?.(result.runDir);
       continue;
@@ -693,15 +705,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             codexCommand,
             nativeSplitTerminals,
             abortSignal: interruptContext.controller.signal,
-            logger: (line) => console.log(line),
+            logger: writeStdoutLine,
           }),
         });
         interruptContext.lastRunDir = result.runDir;
-        console.log(`run ${result.runId} => ${result.status}`);
-        console.log(`workspace: ${result.runDir}`);
+        writeStdoutLine(`run ${result.runId} => ${result.status}`);
+        writeStdoutLine(`workspace: ${result.runDir}`);
         if (result.status === 'paused') {
-          console.log(`current paused node: ${result.currentNodeId}`);
-          console.log('use flowbraid resume <run-dir> or flowbraid send <run-dir> <message> to continue');
+          writeStdoutLine(`current paused node: ${result.currentNodeId}`);
+          writeStdoutLine('use flowbraid resume <run-dir> or flowbraid send <run-dir> <message> to continue');
         }
         stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
         return result.status === 'failed' ? 1 : 0;
@@ -756,11 +768,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             codexCommand,
             nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
             abortSignal: interruptContext.controller.signal,
-            logger: (line) => console.log(line),
+            logger: writeStdoutLine,
           }),
         });
-        console.log(`run ${result.runId} => ${result.status}`);
-        console.log(`workspace: ${result.runDir}`);
+        writeStdoutLine(`run ${result.runId} => ${result.status}`);
+        writeStdoutLine(`workspace: ${result.runDir}`);
         stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
         return result.status === 'failed' ? 1 : 0;
       } catch (error) {
@@ -801,13 +813,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
             abortSignal: interruptContext.controller.signal,
             interactiveTerminal: { input: process.stdin, output: process.stdout },
-            logger: (line) => console.log(line),
+            logger: writeStdoutLine,
           }),
         });
-        console.log(`run ${result.runId} => ${result.status}`);
-        console.log(`workspace: ${result.runDir}`);
+        writeStdoutLine(`run ${result.runId} => ${result.status}`);
+        writeStdoutLine(`workspace: ${result.runDir}`);
         if (result.status === 'paused') {
-          console.log(`current paused node: ${result.currentNodeId}`);
+          writeStdoutLine(`current paused node: ${result.currentNodeId}`);
         }
         stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
         return result.status === 'failed' ? 1 : 0;
