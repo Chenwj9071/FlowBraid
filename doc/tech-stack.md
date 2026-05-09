@@ -11,7 +11,7 @@
 - 棣栫増浠ユ湰鍦拌繍琛屻€佺洰褰曡惤鐩樺拰缁堢浜や簰涓轰富锛屼笉寮曞叆鏈嶅姟绔€?
 
 ## 鍙鐢ㄨ兘鍔?
-- `child_process.spawn`锛氭墽琛屾湰鍦?shell 鍛戒护鍜岄潪 PTY 鐨?`codex exec`銆?
+- `child_process.spawn`锛氭墽琛屾湰鍦?shell 鍛戒护鍜岄潪 PTY 鐨?Codex CLI 鍛戒护銆?
 - `node-pty`锛氱粰 `codex` 浜や簰浠诲姟鑺傜偣鎻愪緵 PTY 鐩撮€氾紝淇濊瘉鍗曠粓绔氦浜掍綋楠屻€?
 - `fs/promises`锛氱鐞?run workspace銆佺姸鎬佹枃浠躲€佹秷鎭鍜屼骇鐗╃洰褰曘€?
 - `yaml`锛氬吋瀹?YAML/JSON 宸ヤ綔娴佸畾涔夈€?

@@ -13,7 +13,7 @@
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点
 - 已支持 `run`、`resume`、`send` 的基本运行闭环
 - `codex` 主路径已迁移到通用 `runtime-state + outcome` 状态协议，主示例和 native split 已优先按新协议流转
-- `codex review` 仅作为历史兼容说明保留，主路径已切到 `runtime-state + outcome`
+- `codex review` 仅作为历史兼容说明保留，不再作为主路径表达
 - `agent_session` 已改为长期会话模型，节点完成由结构化 turn 结果决定
 - 已支持 `contextDir` / `workdir` 双目录模型
 - Windows PTY 路径已显式切换到 UTF-8 控制台后再启动交互式 `codex`
@@ -54,7 +54,7 @@
 - `npm test` 通过
 - 示例 workflow 可在 `examples/` 目录直接运行
 - `agent_session` 已覆盖“等待输入 -> send -> 完成”闭环测试
-- `codex review` 兼容分支与人工反馈回流已有自动化测试
+- `codex review` 历史兼容分支与人工反馈回流已有自动化测试
 - `codex` 通用 outcome 协议已有自动化测试，覆盖：
   - `success / approve / reject`
   - native split 回流恢复
@@ -86,7 +86,7 @@
   - `--outcome approve`
   - `--outcome reject`
 - 主示例 `examples/codex-native-split-demo.workflow.yaml`、`examples/codex-pty-demo.workflow.yaml` 已切到新协议说明
-- `workflow-authoring.md` 已更新为 outcome 主路径写法，`mode: exec|review` 仅作为历史兼容说明
+- `workflow-authoring.md` 已更新为 outcome 主路径写法，`mode: exec|review` 仅作为历史说明
 - `flowbraid` 命令已在本机 link 成功，并完成一次不依赖源码入口的 native split 示例闭环验证
 - 新增 `terminalCloseGraceMs`，native split 收到终态后默认等待 `1500ms` 再请求关闭终端
 - Windows 终端关闭命令新增 `AbortSignal` 兜底，主进程超时后可中断关闭子进程

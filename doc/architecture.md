@@ -32,7 +32,7 @@ FlowBraid 褰撳墠鎷嗘垚鍥涘眰锛?
 - `shell` 鎵ц鍣ㄨ礋璐ｄ竴娆℃€ф湰鍦板懡浠ゃ€?
 - `codex` 浠诲姟鑺傜偣璐熻矗鐭敓鍛藉懆鏈熶换鍔★紝鎺ㄨ崘閫氳繃 `flowbraid node complete|fail` 鎶婄粨鏋滃啓鍥炶繍琛屾€併€?
 - 璋冨害鍣ㄤ紭鍏堣鍙栧綋鍓?attempt 鐨?`runtime-state.json` 鍜?outcome 浜嬩欢鍐冲畾 `codex` 鑺傜偣娴佽浆銆?
-- 旧的 `mode: review` / `verdict` 仅作为历史兼容说明，不再是主路径设计。
+- 旧的 `mode: review` / `verdict` 仅作为历史说明，不再是主路径设计。
 - `codex` 鐨勫紑鍙戞ā寮忓湪浜や簰杩愯鏃堕€氳繃 PTY 鐩撮€氬綋鍓嶇粓绔紝杈撳叆杈撳嚭閮借蛋鍚屼竴鏉?terminal 閫氶亾銆?
 - Windows 涓嬬殑 PTY 浜や簰閾捐矾浼氬厛鍒囧埌 UTF-8 鎺у埗鍙帮紝鍐嶅惎鍔?`codex`锛屽噺灏戜腑鏂囪鑹叉枃妗ｅ拰浜哄伐杈撳叆鐨勪贡鐮侀棶棰樸€?
 - `agent_session` 鑺傜偣涓嶅啀鎶娾€滆繘绋嬮€€鍑衡€濆綋浣滆妭鐐瑰畬鎴愪俊鍙凤紝鑰屾槸璋冪敤 provider 鍋氫竴娆?turn锛屾秷璐瑰畬鏁翠細璇濆巻鍙插苟杩斿洖缁撴瀯鍖栫粨鏋溿€?

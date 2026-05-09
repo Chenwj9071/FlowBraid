@@ -144,8 +144,8 @@ develop:
 ### `mode` 鍏煎瀛楁
 
 `mode` 鐩墠浠嶈瀹炵幇灞傛帴鍙楋紝浣嗗畠宸茬粡涓嶆槸鎺ㄨ崘涓昏矾寰勶細
-- `mode: exec`锛氬吋瀹规棫鐨勫紑鍙?鐢熸垚璇箟
-- `mode: review`锛氬吋瀹规棫鐨?review/verdict 璇箟
+- `mode: exec`锛氫负历史 workflow 保留的旧生成语义
+- `mode: review`锛氫负历史 workflow 保留的 review/verdict 语义
 
 鍏煎璇存槑锛?
 - 鏃?workflow 浠嶅彲缁х画杩愯
@@ -312,7 +312,7 @@ nodes:
 - `approval` 缂哄皯 `approve` 鎴?`reject`銆?
 - `agent_session` 璇敤 `resume`銆?
 - `codex` 鑺傜偣 prompt 娌℃湁鏄庣‘瑕佹眰涓婃姤 `flowbraid node complete --outcome ...`銆?
-- 旧 workflow 仍可能使用 `mode: review` 和 `verdict:`；新 workflow 不应把它们当作节点身份或主流转协议。
+- 历史 workflow 仍可能使用 `mode: review` 和 `verdict:`；新 workflow 不应把它们当作节点身份或主流转协议。
 - 鎶?`contextDir` 褰撲綔鐪熷疄涓氬姟鐩綍銆?
 - 鍦ㄥ崟琛?YAML 閲岀‖濉炲鏉?shell 鍛戒护銆?
 - 娌℃湁澶辫触鍒嗘敮鍗存湡寰呰嚜鍔ㄥ洖娴併€?
