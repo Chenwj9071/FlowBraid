@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -25,7 +25,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     outputFile: develop-last-message.md
     next: done
@@ -107,7 +106,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: ${originalTask}
     outputFile: develop-last-message.md
     next: done
@@ -189,7 +187,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     next: done
   done:
@@ -228,3 +225,4 @@ nodes:
     expect(prompt).not.toContain('latest.human.feedback:');
   });
 });
+

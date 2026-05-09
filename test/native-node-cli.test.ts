@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -18,6 +18,8 @@ describe('native node CLI protocol', () => {
       runDir,
       '--node-id',
       'develop',
+      '--attempt-id',
+      'attempt-develop-1',
       '--terminal-pid',
       '3001',
     ]);
@@ -38,6 +40,10 @@ describe('native node CLI protocol', () => {
       runDir,
       '--node-id',
       'develop',
+      '--attempt-id',
+      'attempt-develop-1',
+      '--outcome',
+      'success',
       '--summary',
       'done',
     ]);
@@ -59,6 +65,8 @@ describe('native node CLI protocol', () => {
       runDir,
       '--node-id',
       'verify',
+      '--attempt-id',
+      'attempt-verify-1',
       '--message',
       'verification failed',
     ]);
@@ -80,6 +88,8 @@ describe('native node CLI protocol', () => {
       runDir,
       '--node-id',
       'verify',
+      '--attempt-id',
+      'attempt-verify-1',
       '--file',
       'artifacts\\verify-report.md',
     ]);
@@ -101,6 +111,10 @@ describe('native node CLI protocol', () => {
       runDir,
       '--node-id',
       'develop',
+      '--attempt-id',
+      'attempt-develop-1',
+      '--outcome',
+      'success',
       '--summary',
       'done',
     ]);
@@ -113,6 +127,8 @@ describe('native node CLI protocol', () => {
       runDir,
       '--node-id',
       'develop',
+      '--attempt-id',
+      'attempt-develop-1',
       '--file',
       'artifacts\\develop-last-message.md',
     ]);
@@ -122,6 +138,25 @@ describe('native node CLI protocol', () => {
     expect(state.status).toBe('completed');
     expect(state.result?.kind).toBe('complete');
     expect(state.lastArtifactPath).toBe('artifacts\\develop-last-message.md');
+  });
+
+  it('requires an explicit outcome for node complete', async () => {
+    const { runDir } = await createRunFixture();
+
+    await expect(
+      cliMain([
+        'node',
+        'complete',
+        '--run-dir',
+        runDir,
+        '--node-id',
+        'develop',
+        '--attempt-id',
+        'attempt-develop-1',
+        '--summary',
+        'done',
+      ]),
+    ).rejects.toThrow(/--outcome/);
   });
 });
 
@@ -139,12 +174,10 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     next: verify
   verify:
     type: codex
-    mode: review
     prompt: verify calc
     next: done
   done:
@@ -160,3 +193,4 @@ nodes:
   await mkdir(path.join(runWorkspace.nodesDir, 'verify', 'state'), { recursive: true });
   return { runDir: runWorkspace.runDir };
 }
+

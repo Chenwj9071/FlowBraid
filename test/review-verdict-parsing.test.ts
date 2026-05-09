@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -47,8 +47,8 @@ async function createFakeOutcomeCodex(binDir: string): Promise<void> {
   await writeFile(cmdPath, '@echo off\r\nnode "%~dp0fake-outcome-codex.js" %*\r\n', 'utf8');
 }
 
-describe('runtime-state 与 outcome 归一化', () => {
-  it('优先读取当前 attempt 的 runtime-state outcome', async () => {
+describe('runtime-state and outcome normalization', () => {
+  it('prefers the current attempt runtime-state outcome', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-outcome-runtime-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const binDir = path.join(tempRoot, 'bin');
@@ -70,7 +70,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement
     next: verify
   verify:
@@ -105,7 +104,7 @@ nodes:
     }
   }, 20000);
 
-  it('不会把旧 attempt 的 artifact 当成当前结果', async () => {
+  it('涓嶄細鎶婃棫 attempt 鐨?artifact 褰撴垚褰撳墠缁撴灉', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-outcome-stale-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const binDir = path.join(tempRoot, 'bin');
@@ -156,3 +155,4 @@ nodes:
     }
   }, 20000);
 });
+

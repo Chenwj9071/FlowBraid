@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { parseWorkflowText, validateWorkflow, WorkflowError } from '../src/workflow.js';
 
 describe('workflow reentry validation', () => {
@@ -9,7 +9,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement
     reentry:
       mode: resume
@@ -32,7 +31,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement
     reentry:
       mode: unsupported
@@ -44,3 +42,4 @@ nodes:
     expect(() => validateWorkflow(workflow)).toThrow(WorkflowError);
   });
 });
+

@@ -69,9 +69,7 @@ if (args[0] !== 'exec') {
 }
 
 const parsed = parseArgs(args);
-const mode =
-  process.env.FLOWBRAID_CODEX_MODE ||
-  (process.env.FLOWBRAID_NODE_ID === 'verify' || /legacy\\.node\\.mode:\\s*review/i.test(parsed.prompt) ? 'review' : 'exec');
+const mode = /You are the verification node/i.test(parsed.prompt) ? 'review' : 'exec';
 const runDir = process.env.FLOWBRAID_RUN_DIR || process.cwd();
 const calcPath = path.join(parsed.workdir, 'calc.js');
 const feedbackAppliedPath = path.join(parsed.workdir, 'feedback-applied.txt');
@@ -281,3 +279,4 @@ describe('codex PTY 交互模式', () => {
     }
   }, 60000);
 });
+

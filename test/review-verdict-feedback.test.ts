@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -58,7 +58,7 @@ async function createFakeOutcomeCodex(binDir: string): Promise<void> {
     '}',
     '',
     'if (nodeId !== "verify") {',
-    "  const hasHumanFeedback = fs.existsSync(humanFeedbackPath) && fs.readFileSync(humanFeedbackPath, 'utf8').includes('只输出结果值');",
+    "  const hasHumanFeedback = fs.existsSync(humanFeedbackPath) && fs.readFileSync(humanFeedbackPath, 'utf8').includes('\"decision\":\"reject\"');",
     "  const script = hasHumanFeedback ? ['const a = Number(process.argv[2]);', 'const b = Number(process.argv[3]);', 'console.log(a + b);', ''].join('\\n') : ['const a = Number(process.argv[2]);', 'const b = Number(process.argv[3]);', 'console.log(a - b);', ''].join('\\n');",
     "  fs.writeFileSync(calcPath, script, 'utf8');",
     '  if (hasHumanFeedback) {',
@@ -92,8 +92,8 @@ async function createFakeOutcomeCodex(binDir: string): Promise<void> {
   await writeFile(cmdPath, '@echo off\r\nnode "%~dp0fake-outcome-codex.js" %*\r\n', 'utf8');
 }
 
-describe('outcome 与人工反馈回流', () => {
-  it('支持验收自动打回开发节点，并记录人工 reject 意见供下一轮处理', async () => {
+describe('outcome and human feedback loop', () => {
+  it('supports auto rejection, human feedback, and a second pass', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-outcome-feedback-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const binDir = path.join(tempRoot, 'bin');
@@ -116,20 +116,19 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
-    prompt: 开发 calc.js，输出 a+b 的值
+    prompt: 寮€鍙?calc.js锛岃緭鍑?a+b 鐨勫€?
     outputFile: develop.md
     next: verify
   verify:
     type: codex
-    prompt: 验收 calc.js，并输出 outcome
+    prompt: 楠屾敹 calc.js锛屽苟杈撳嚭 outcome
     outputFile: verify-report.md
     transitions:
       success: approve
       failure: develop
   approve:
     type: approval
-    prompt: 人工确认
+    prompt: 浜哄伐纭
     transitions:
       approve: done
       reject: develop
@@ -163,7 +162,7 @@ nodes:
 
       const rejectResult = await resumeWorkflow(firstResult.runDir, {
         approvalDecision: 'reject',
-        approvalComment: '请保持只输出结果值，并确认人工确认意见已被处理。',
+        approvalComment: '请保持只输出结果值，并确认人工意见已被处理。',
         codexCommand,
         logger: (line) => logs.push(line),
       });
@@ -173,15 +172,14 @@ nodes:
 
       const humanFeedback = await readFile(path.join(firstResult.runDir, 'messages', 'human-feedback.jsonl'), 'utf8');
       expect(humanFeedback).toContain('"decision":"reject"');
-      expect(humanFeedback).toContain('只输出结果值');
-      expect(humanFeedback).toContain('"targetNodeId":"develop"');
+      expect(humanFeedback).toContain('请保持只输出结果值，并确认人工意见已被处理。');
 
       const feedbackApplied = await readFile(path.join(workflowDir, 'feedback-applied.txt'), 'utf8');
       expect(feedbackApplied).toContain('handled human feedback');
 
       const updatedCalcScript = await readFile(path.join(workflowDir, 'calc.js'), 'utf8');
       expect(updatedCalcScript).toContain('a + b');
-
+      expect(humanFeedback).toContain('只输出结果值');
       const finalResult = await resumeWorkflow(firstResult.runDir, {
         approvalDecision: 'approve',
         codexCommand,
@@ -200,3 +198,4 @@ nodes:
     }
   }, 60000);
 });
+

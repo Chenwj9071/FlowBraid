@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
@@ -75,7 +75,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     reentry:
       mode: resume
@@ -139,3 +138,4 @@ nodes:
 
   return { runDir: workspace.runDir };
 }
+

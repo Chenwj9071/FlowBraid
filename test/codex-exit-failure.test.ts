@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -18,8 +18,8 @@ async function createAlwaysFailCodex(binDir: string): Promise<void> {
   await writeFile(cmdPath, '@echo off\r\nnode "%~dp0always-fail-codex.js" %*\r\n', 'utf8');
 }
 
-describe('codex 系统失败处理', () => {
-  it('codex 非零退出码会直接让 run 失败，而不是沿 failure 回流无限重试', async () => {
+describe('codex 绯荤粺澶辫触澶勭悊', () => {
+  it('codex 闈為浂閫€鍑虹爜浼氱洿鎺ヨ run 澶辫触锛岃€屼笉鏄部 failure 鍥炴祦鏃犻檺閲嶈瘯', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-codex-exit-fail-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const binDir = path.join(tempRoot, 'bin');
@@ -38,14 +38,12 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: write calc.js
     transitions:
       success: verify
       failure: verify
   verify:
     type: codex
-    mode: review
     prompt: verify calc.js
     transitions:
       success: done
@@ -74,3 +72,4 @@ nodes:
     }
   }, 40000);
 });
+

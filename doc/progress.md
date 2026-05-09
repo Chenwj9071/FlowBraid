@@ -13,7 +13,7 @@
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点
 - 已支持 `run`、`resume`、`send` 的基本运行闭环
 - `codex` 主路径已迁移到通用 `runtime-state + outcome` 状态协议，主示例和 native split 已优先按新协议流转
-- `codex review` 旧兼容路径仍可读取 `verdict: approve|reject`，但主路径已切到 `runtime-state + outcome`
+- `codex review` 仅作为历史兼容说明保留，主路径已切到 `runtime-state + outcome`
 - `agent_session` 已改为长期会话模型，节点完成由结构化 turn 结果决定
 - 已支持 `contextDir` / `workdir` 双目录模型
 - Windows PTY 路径已显式切换到 UTF-8 控制台后再启动交互式 `codex`
@@ -26,6 +26,7 @@
 - CLI 交互式输出已切换为统一行写入器，避免 approval / resume / send 之后的 scheduler 日志粘行或覆盖前一行
 - `codex` 提示词已从角色化约束收敛为流程协议约束，回流时显式注入来源、原因和必需动作，终态命令触发条件也已改为强约束表述
 - 已新增 `development-experience-and-pitfalls.md`，归档本轮开发、设计和编码问题的避坑指南，并提炼可执行规范
+- 已通过本地 `npm link` 安装 `flowbraid` 命令，并用已编译产物把 native split 示例继续跑到 `completed`
 
 ## 已完成里程碑
 1. 冻结需求、架构和技术选型文档
@@ -85,7 +86,8 @@
   - `--outcome approve`
   - `--outcome reject`
 - 主示例 `examples/codex-native-split-demo.workflow.yaml`、`examples/codex-pty-demo.workflow.yaml` 已切到新协议说明
-- `workflow-authoring.md` 已更新为 outcome 主路径写法，`mode: exec|review` 仅保留兼容说明
+- `workflow-authoring.md` 已更新为 outcome 主路径写法，`mode: exec|review` 仅作为历史兼容说明
+- `flowbraid` 命令已在本机 link 成功，并完成一次不依赖源码入口的 native split 示例闭环验证
 - 新增 `terminalCloseGraceMs`，native split 收到终态后默认等待 `1500ms` 再请求关闭终端
 - Windows 终端关闭命令新增 `AbortSignal` 兜底，主进程超时后可中断关闭子进程
 - 交互式 CLI 的主调度日志与收尾状态输出改为显式清行 + CRLF 写入，提升 Windows 下 approval 后的光标稳定性
@@ -106,8 +108,8 @@
 - native split 关闭逻辑已从“仅 PID”改为“标题匹配主关窗 + PID 兜底”，关闭命令会使用 `FlowBraid native <node> [<attemptId>]` 作为窗口标题标识
 
 ## 后续建议
-1. 继续删除 `mode: exec|review` 的主路径依赖，最终只保留兼容层或彻底移除
-2. 把 `workflow-authoring.md`、`requirements.md`、`architecture.md` 进一步收紧为以 outcome 为主、兼容层为辅的状态机表述
+1. 继续删除 `mode: exec|review` 的主路径依赖，最终仅保留必要的历史兼容说明或彻底移除
+2. 把 `workflow-authoring.md`、`requirements.md`、`architecture.md` 进一步收紧为以 outcome 为主的状态机表述
 3. 为 `timeline.json` 增加更明确的 CLI 展示或调试输出
 4. 继续观察真实 Windows 终端下的 native split 行为，必要时补充更细粒度的 terminal / session 诊断日志
 
@@ -115,4 +117,5 @@
 - 每次做完一轮明确功能，更新这里
 - 如果默认行为或状态协议变了，先更新这里，再改代码
 - 新 agent 启动前优先读取本文件，避免沿用过期上下文
+
 

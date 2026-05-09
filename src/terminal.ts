@@ -18,6 +18,12 @@ export function resetTerminalForPrompt(
   } catch {
     // Ignore best-effort raw mode restoration failures.
   }
+
+  try {
+    output.write(getTerminalResetSequence());
+  } catch {
+    // Ignore best-effort terminal reset write failures.
+  }
 }
 
 export function getTerminalResetSequence(): string {

@@ -56,8 +56,8 @@ function resolveCodexCommand(flags: Record<string, string | boolean>): string | 
 
 function prepareConsoleForPromptOutput(): void {
   try {
-    if (process.stderr.isTTY) {
-      process.stderr.write('\r\n');
+    if (process.stdout.isTTY) {
+      process.stdout.write('\r\n');
     }
   } catch {
     // best-effort only
@@ -86,7 +86,7 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
     throw new Error('current paused node is not approval');
   }
 
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     while (true) {
       const answer = await Promise.race([
@@ -106,13 +106,13 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
               finishPromptLine();
               return { decision: normalized, comment: trimmed };
             }
-            process.stderr.write('reject requires a comment\r\n');
+            process.stdout.write('reject requires a comment\r\n');
           }
         }
         finishPromptLine();
         return { decision: normalized };
       }
-      process.stderr.write('please enter approve or reject\r\n');
+      process.stdout.write('please enter approve or reject\r\n');
     }
   } finally {
     rl.close();
@@ -121,10 +121,10 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
 
 async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
   prepareConsoleForPromptOutput();
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     if (promptText) {
-      process.stderr.write(`${promptText}\r\n`);
+      process.stdout.write(`${promptText}\r\n`);
     }
     const answer = await Promise.race([
       rl.question('press Enter to continue, or q to quit: '),
@@ -140,7 +140,7 @@ async function promptGateContinue(promptText: string, abortSignal?: AbortSignal)
 
 async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<string> {
   prepareConsoleForPromptOutput();
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([rl.question('agent> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
@@ -150,7 +150,7 @@ async function promptAgentSessionMessage(abortSignal?: AbortSignal): Promise<str
 
 async function promptSendMessage(abortSignal?: AbortSignal): Promise<string> {
   prepareConsoleForPromptOutput();
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await Promise.race([rl.question('message> '), createAbortPromise(abortSignal, () => rl.close())]);
   } finally {
@@ -261,16 +261,16 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   const runtimeStatePath = getNodeRuntimeStatePath(nodeDir);
   const existingState = await readNativeSessionSafely(sessionPath);
   const existingRuntimeState = await readNodeRuntimeStateSafely(runtimeStatePath);
+  const attemptId = requireNodeCommandFlag(flags, 'attempt-id', subcommand);
   const baseState = existingState ?? {
     mode: 'native_split_terminal',
     status: 'launching',
-    attemptId: flags['attempt-id'] ? String(flags['attempt-id']) : undefined,
     startedAt: nowIso(),
     updatedAt: nowIso(),
   };
   const baseRuntimeState: NodeRuntimeState = existingRuntimeState ?? {
     nodeId,
-    attemptId: flags['attempt-id'] ? String(flags['attempt-id']) : undefined,
+    attemptId,
     status: 'launching',
     startedAt: nowIso(),
     updatedAt: nowIso(),
@@ -279,7 +279,6 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   switch (subcommand) {
     case 'start': {
       const terminalPid = flags['terminal-pid'] ? Number(String(flags['terminal-pid'])) : undefined;
-      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       const nextState: NativeSessionState = {
         ...baseState,
@@ -321,8 +320,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'complete': {
       const summary = flags.summary ? String(flags.summary) : undefined;
-      const outcome = flags.outcome ? String(flags.outcome) : undefined;
-      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
+      const outcome = requireNodeCompleteOutcome(flags, subcommand);
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       await updateNativeSessionState(sessionPath, (current) => ({
         ...buildNativeTerminalState(current ?? baseState, 'completed', {
@@ -364,7 +362,6 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'fail': {
       const message = flags.message ? String(flags.message) : undefined;
-      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       if (!message) {
         throw new Error('node fail requires --message');
@@ -408,7 +405,6 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'pause': {
       const reason = flags.reason ? String(flags.reason) : undefined;
-      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       if (!reason) {
         throw new Error('node pause requires --reason');
@@ -451,7 +447,6 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
 
     case 'artifact': {
       const file = flags.file ? String(flags.file) : undefined;
-      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       if (!file) {
         throw new Error('node artifact requires --file');
@@ -483,7 +478,6 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     }
 
     case 'heartbeat': {
-      const attemptId = flags['attempt-id'] ? String(flags['attempt-id']) : baseState.attemptId;
       const sessionId = flags['session-id'] ? String(flags['session-id']) : baseState.sessionId;
       await updateNativeSessionState(sessionPath, (current) => {
         const effectiveState = current ?? baseState;
@@ -516,6 +510,22 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     default:
       throw new Error(`unsupported node subcommand: ${String(subcommand)}`);
   }
+}
+
+function requireNodeCommandFlag(flags: Record<string, string | boolean>, name: string, subcommand?: string): string {
+  const value = flags[name];
+  if (value === undefined || value === null || value === '') {
+    throw new Error(`node ${subcommand ?? 'command'} requires --${name}`);
+  }
+  return String(value);
+}
+
+function requireNodeCompleteOutcome(flags: Record<string, string | boolean>, subcommand?: string): 'success' | 'approve' | 'reject' {
+  const rawOutcome = requireNodeCommandFlag(flags, 'outcome', subcommand);
+  if (rawOutcome === 'success' || rawOutcome === 'approve' || rawOutcome === 'reject') {
+    return rawOutcome;
+  }
+  throw new Error(`node ${subcommand ?? 'complete'} --outcome must be success, approve, or reject`);
 }
 
 function buildNativeTerminalState(
@@ -904,8 +914,8 @@ function createAbortPromise(abortSignal: AbortSignal | undefined, cleanup?: () =
 
 async function settleTerminalAfterPrompt(): Promise<void> {
   try {
-    if (process.stderr.isTTY) {
-      process.stderr.write('\r\n');
+    if (process.stdout.isTTY) {
+      process.stdout.write('\r\n');
     }
   } catch {
     // Ignore best-effort line separation failures.
@@ -915,7 +925,7 @@ async function settleTerminalAfterPrompt(): Promise<void> {
 
 function finishPromptLine(): void {
   try {
-    process.stderr.write('\r\n');
+    process.stdout.write('\r\n');
   } catch {
     // Ignore best-effort line separation failures.
   }

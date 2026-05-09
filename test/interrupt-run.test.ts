@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { chmod, mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -24,8 +24,8 @@ setInterval(() => {
   return process.platform === 'win32' ? cmdPath : shPath;
 }
 
-describe('运行中断处理', () => {
-  it('abortSignal 触发后会终止当前 run 并落盘失败原因', async () => {
+describe('run interruption', () => {
+  it('fails the current run when abortSignal fires', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-run-interrupt-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const binDir = path.join(tempRoot, 'bin');
@@ -40,7 +40,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: write something and keep running
     next: done
   done:
@@ -78,3 +77,4 @@ nodes:
     expect(nodeState.detail).toBe('用户中断运行');
   }, 30000);
 });
+

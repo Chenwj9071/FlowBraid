@@ -1,4 +1,4 @@
-id: codex-pty-demo
+﻿id: codex-pty-demo
 workdir: ./demo-workdir
 contextDir: ./demo-dev
 start: prepare
@@ -103,3 +103,4 @@ nodes:
   done:
     type: end
     message: demo completed
+

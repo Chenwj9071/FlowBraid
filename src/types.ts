@@ -39,7 +39,6 @@ export interface CodexNodeDefinition extends WorkflowBaseNode {
   model?: string;
   outputFile?: string;
   reentry?: CodexReentryOptions;
-  mode?: 'exec' | 'review';
 }
 
 export interface AgentSessionNodeDefinition extends WorkflowBaseNode {

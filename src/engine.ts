@@ -280,7 +280,7 @@ export class FlowBraidEngine {
                   nextNodeId = this.resolveNodeNextFromRuntime(node, runtimeState);
                 }
               } else {
-                detail = `codex ${node.mode ?? 'task'} 瀹屾垚`;
+                detail = 'codex 完成';
               }
             }
             nextNodeId ??= resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');

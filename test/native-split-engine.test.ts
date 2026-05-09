@@ -1,4 +1,4 @@
-import path from 'node:path';
+﻿import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -24,7 +24,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     outputFile: develop.md
     next: done
@@ -121,7 +120,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     next: done
   done:
@@ -361,7 +359,6 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     transitions:
       success: verify
@@ -630,13 +627,11 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     transitions:
       success: verify
   verify:
     type: codex
-    mode: review
     prompt: verify calc
     transitions:
       success: done
@@ -737,13 +732,11 @@ start: develop
 nodes:
   develop:
     type: codex
-    mode: exec
     prompt: implement calc
     transitions:
       success: verify
   verify:
     type: codex
-    mode: review
     prompt: verify calc
     transitions:
       success: done
@@ -865,3 +858,4 @@ async function readCurrentAttemptId(runDir: string): Promise<string> {
   }
   return runState.currentAttemptId;
 }
+

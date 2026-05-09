@@ -118,9 +118,6 @@ function validateNode(nodeId: string, node: WorkflowNodeDefinition): void {
     if (typeof node.prompt !== 'string' || node.prompt.trim() === '') {
       throw new WorkflowError(`codex 节点 ${nodeId} 必须提供非空 prompt`);
     }
-    if (node.mode !== undefined && node.mode !== 'exec' && node.mode !== 'review') {
-      throw new WorkflowError(`codex 节点 ${nodeId} 的 mode 只能是 exec 或 review`);
-    }
     if (
       node.reentry &&
       node.reentry.mode !== undefined &&

@@ -1,4 +1,4 @@
-id: codex-native-split-demo
+﻿id: codex-native-split-demo
 workdir: ./demo-workdir
 contextDir: ./demo-dev
 start: prepare
@@ -46,15 +46,16 @@ nodes:
       - If the latest verify report says comments are missing, your next revision must add comments directly in calc.js without changing the correct behavior
       - If the latest human feedback asks for extra explanation, address it after the verify requirements are satisfied
       - Only modify calc.js unless the task explicitly requires something else
+      - When you finish, report the result with `flowbraid node complete --attempt-id <current attempt> --outcome ...`
     outputFile: develop-last-message.md
     next: review
 
   review:
     type: approval
     prompt: |
-      这是 develop 完成后的人工审核节点。
-      - approve：继续进入 verify 节点做自动化验收
-      - reject：回到 develop 节点继续修改
+      杩欐槸 develop 瀹屾垚鍚庣殑浜哄伐瀹℃牳鑺傜偣銆?
+      - approve锛氱户缁繘鍏?verify 鑺傜偣鍋氳嚜鍔ㄥ寲楠屾敹
+      - reject锛氬洖鍒?develop 鑺傜偣缁х画淇敼
     transitions:
       approve: verify
       reject: develop
@@ -84,8 +85,8 @@ nodes:
 
       Output requirements:
       - Write a verification report to verify.report.path
-      - If reject, explain the exact failure and the concrete fix, then report `flowbraid node complete --outcome reject`
-      - If approve, summarize the commands you ran, the outputs, and the comment check result, then report `flowbraid node complete --outcome approve`
+      - If reject, explain the exact failure and the concrete fix, then report `flowbraid node complete --attempt-id <current attempt> --outcome reject`
+      - If approve, summarize the commands you ran, the outputs, and the comment check result, then report `flowbraid node complete --attempt-id <current attempt> --outcome approve`
     outputFile: verify-report.md
     transitions:
       success: approve
@@ -103,3 +104,4 @@ nodes:
   done:
     type: end
     message: native split demo completed
+
