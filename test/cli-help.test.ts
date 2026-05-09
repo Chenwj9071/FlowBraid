@@ -25,7 +25,7 @@ describe('cli help output', () => {
   it('prints enriched usage text when no command is provided', async () => {
     const exitCode = await main([]);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     const output = stdoutSpy.mock.calls.map((call) => call.join(' ')).join('\n');
     expect(output).toContain('FlowBraid CLI');
     expect(output).toContain('用 flowbraid workflow-help 查看简化版工作流编写说明');

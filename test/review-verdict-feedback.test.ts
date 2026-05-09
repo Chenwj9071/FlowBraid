@@ -192,7 +192,8 @@ nodes:
       );
       expect(finalState.status).toBe('completed');
       expect(finalState.currentNodeId).toBeNull();
-      expect(logs.some((line) => line.includes('runtime'))).toBe(true);
+      expect(logs.some((line) => line.includes('node develop succeeded'))).toBe(true);
+      expect(logs.some((line) => line.includes('node verify succeeded'))).toBe(true);
     } finally {
       process.env.PATH = originalPath;
     }

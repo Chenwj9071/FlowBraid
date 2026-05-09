@@ -52,6 +52,8 @@ import {
   writeNativeSessionState,
 } from './native-session.js';
 import { getNodeRuntimeStatePath, readNodeRuntimeState } from './node-runtime.js';
+import { deriveRuntimeStateFromControlLog, getControlLogPath, writeDerivedRuntimeState } from './control-log.js';
+import { acceptControlEvent } from './control-events.js';
 
 type NodeOutcome = 'success' | 'failure' | 'paused';
 type RuntimeWorkflow = WorkflowDefinition & WorkflowSourceMeta;
@@ -101,6 +103,10 @@ export class FlowBraidEngine {
     }
     if (currentNode?.type === 'agent_session') {
       throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
+    }
+
+    if (currentNode?.type === 'codex' && state.currentNodeId && state.currentAttemptId) {
+      await this.supersedePausedAttempt(workspace, state.currentNodeId, state.currentAttemptId);
     }
 
     state.status = 'running';
@@ -236,6 +242,9 @@ export class FlowBraidEngine {
         path.join(workspace.messagesDir, 'events.jsonl'),
         `${JSON.stringify({ type: 'node.started', nodeId: currentNodeId, attemptId, at: nowIso() })}\n`,
       );
+      if (node.type === 'codex') {
+        await this.recordControlEvent(workspace, currentNodeId, attemptId, 'attempt.started', 'scheduler');
+      }
 
       let outcome: NodeOutcome = 'success';
       let exitCode: number | null = null;
@@ -1003,17 +1012,53 @@ export class FlowBraidEngine {
 
   private async readCurrentNodeRuntimeState(nodeDir: string, attemptId: string): Promise<NodeRuntimeState | null> {
     try {
-      const state = await readNodeRuntimeState(getNodeRuntimeStatePath(nodeDir));
-      if (state.attemptId === attemptId) {
+      const controlDerived = await deriveRuntimeStateFromControlLog(getControlLogPath(nodeDir), path.basename(nodeDir));
+      const fileState = await readNodeRuntimeState(getNodeRuntimeStatePath(nodeDir));
+      const controlMatches = controlDerived?.attemptId === attemptId ? controlDerived : null;
+      const fileMatches = fileState?.attemptId === attemptId ? fileState : null;
+      const state = this.selectPreferredRuntimeState(controlMatches, fileMatches);
+      if (state) {
         return state;
       }
-      if (!state.attemptId && state.status === 'completed' && state.outcome) {
-        return { ...state, attemptId };
+      if (!fileState.attemptId && fileState.status === 'completed' && fileState.outcome) {
+        return { ...fileState, attemptId };
       }
       return null;
     } catch {
       return null;
     }
+  }
+
+  private selectPreferredRuntimeState(
+    controlMatches: NodeRuntimeState | null,
+    fileMatches: NodeRuntimeState | null,
+  ): NodeRuntimeState | null {
+    if (!controlMatches) {
+      return fileMatches;
+    }
+    if (!fileMatches) {
+      return controlMatches;
+    }
+
+    const controlTerminal = this.isTerminalRuntimeStatus(controlMatches.status);
+    const fileTerminal = this.isTerminalRuntimeStatus(fileMatches.status);
+    if (controlTerminal && !fileTerminal) {
+      return controlMatches;
+    }
+    if (!controlTerminal && fileTerminal) {
+      return fileMatches;
+    }
+
+    const controlTime = Date.parse(controlMatches.updatedAt);
+    const fileTime = Date.parse(fileMatches.updatedAt);
+    if (Number.isFinite(controlTime) && Number.isFinite(fileTime) && fileTime > controlTime) {
+      return fileMatches;
+    }
+    return controlMatches;
+  }
+
+  private isTerminalRuntimeStatus(status: NodeRuntimeState['status']): boolean {
+    return status === 'completed' || status === 'failed' || status === 'paused' || status === 'timed_out' || status === 'canceled';
   }
 
   private async buildCodexReentryContext(
@@ -1120,6 +1165,44 @@ export class FlowBraidEngine {
     }
     Object.assign(target, patch);
     await persistRunTimeline(workspace, timeline);
+  }
+
+  private async recordControlEvent(
+    workspace: RunWorkspace,
+    nodeId: string,
+    attemptId: string,
+    kind: 'attempt.started' | 'attempt.superseded' | 'recovery.orphaned',
+    source: 'scheduler' | 'recovery-synthesized',
+    payload?: Record<string, unknown>,
+  ): Promise<void> {
+    const nodeDir = path.join(workspace.nodesDir, nodeId);
+    const controlLogPath = getControlLogPath(nodeDir);
+    await acceptControlEvent({
+      controlLogPath,
+      runId: workspace.runId,
+      nodeId,
+      attemptId,
+      kind,
+      source,
+      payload,
+    });
+    const derivedState = await deriveRuntimeStateFromControlLog(controlLogPath, nodeId);
+    await writeDerivedRuntimeState(getNodeRuntimeStatePath(nodeDir), derivedState);
+  }
+
+  private async supersedePausedAttempt(workspace: RunWorkspace, nodeId: string, attemptId: string): Promise<void> {
+    await this.recordControlEvent(workspace, nodeId, attemptId, 'attempt.superseded', 'scheduler', {
+      reason: 'superseded by resume',
+    });
+    await this.updateTimelineEntry(workspace, attemptId, {
+      status: 'closed',
+      finishedAt: nowIso(),
+      detail: 'superseded by resume',
+    });
+    await appendText(
+      path.join(workspace.messagesDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'node.superseded', nodeId, attemptId, at: nowIso(), reason: 'superseded by resume' })}\n`,
+    );
   }
 }
 

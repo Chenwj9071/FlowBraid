@@ -21,7 +21,16 @@ import {
   writeNativeSessionState,
 } from './native-session.js';
 import { appendNodeRuntimeEvent, getNodeRuntimeStatePath, readNodeRuntimeState, writeNodeRuntimeState } from './node-runtime.js';
-import type { NativeSessionResult, NativeSessionState, NodeRuntimeState, NodeState, RunTimelineEntry } from './types.js';
+import { deriveRuntimeStateFromControlLog, getControlLogPath, writeDerivedRuntimeState } from './control-log.js';
+import { acceptControlEvent } from './control-events.js';
+import type {
+  ControlEventKind,
+  NativeSessionResult,
+  NativeSessionState,
+  NodeRuntimeState,
+  NodeState,
+  RunTimelineEntry,
+} from './types.js';
 
 function printUsage(): void {
   console.log(`FlowBraid CLI
@@ -365,6 +374,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   const nodeDir = path.join(workspace.nodesDir, nodeId);
   const sessionPath = getNativeSessionPath(nodeDir);
   const runtimeStatePath = getNodeRuntimeStatePath(nodeDir);
+  const controlLogPath = getControlLogPath(nodeDir);
   const existingState = await readNativeSessionSafely(sessionPath);
   const existingRuntimeState = await readNodeRuntimeStateSafely(runtimeStatePath);
   const attemptId = requireNodeCommandFlag(flags, 'attempt-id', subcommand);
@@ -381,6 +391,7 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
     startedAt: nowIso(),
     updatedAt: nowIso(),
   };
+  const resolveOperationId = (): string | undefined => (flags['operation-id'] ? String(flags['operation-id']) : undefined);
 
   switch (subcommand) {
     case 'start': {
@@ -412,6 +423,11 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         at: nowIso(),
         terminalPid,
       });
+      await appendAcceptedControlEvent(controlLogPath, workspace.runId, nodeId, attemptId, 'attempt.started', 'compat-cli', {
+        terminalPid,
+        sessionId,
+      }, resolveOperationId());
+      await refreshDerivedRuntimeState(controlLogPath, runtimeStatePath, nodeId);
       await appendNodeRuntimeEvent(workspace.messagesDir, {
         type: 'node.state',
         nodeId,
@@ -453,6 +469,12 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         at: nowIso(),
         summary,
       });
+      await appendAcceptedControlEvent(controlLogPath, workspace.runId, nodeId, attemptId, 'complete', 'compat-cli', {
+        outcome,
+        summary,
+        sessionId,
+      }, resolveOperationId());
+      await refreshDerivedRuntimeState(controlLogPath, runtimeStatePath, nodeId);
       await appendNodeRuntimeEvent(workspace.messagesDir, {
         type: 'node.state',
         nodeId,
@@ -497,6 +519,11 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         at: nowIso(),
         message,
       });
+      await appendAcceptedControlEvent(controlLogPath, workspace.runId, nodeId, attemptId, 'fail', 'compat-cli', {
+        message,
+        sessionId,
+      }, resolveOperationId());
+      await refreshDerivedRuntimeState(controlLogPath, runtimeStatePath, nodeId);
       await appendNodeRuntimeEvent(workspace.messagesDir, {
         type: 'node.state',
         nodeId,
@@ -539,6 +566,11 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         at: nowIso(),
         reason,
       });
+      await appendAcceptedControlEvent(controlLogPath, workspace.runId, nodeId, attemptId, 'pause', 'compat-cli', {
+        reason,
+        sessionId,
+      }, resolveOperationId());
+      await refreshDerivedRuntimeState(controlLogPath, runtimeStatePath, nodeId);
       await appendNodeRuntimeEvent(workspace.messagesDir, {
         type: 'node.state',
         nodeId,
@@ -580,6 +612,11 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         at: nowIso(),
         file,
       });
+      await appendAcceptedControlEvent(controlLogPath, workspace.runId, nodeId, attemptId, 'artifact', 'compat-cli', {
+        file,
+        sessionId,
+      }, resolveOperationId());
+      await refreshDerivedRuntimeState(controlLogPath, runtimeStatePath, nodeId);
       return 0;
     }
 
@@ -610,6 +647,10 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
         attemptId,
         at: nowIso(),
       });
+      await appendAcceptedControlEvent(controlLogPath, workspace.runId, nodeId, attemptId, 'heartbeat', 'compat-cli', {
+        sessionId,
+      }, resolveOperationId());
+      await refreshDerivedRuntimeState(controlLogPath, runtimeStatePath, nodeId);
       return 0;
     }
 
@@ -783,6 +824,11 @@ function printStatusSnapshot(snapshot: StatusSnapshot): void {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  if (argv.length === 0 || argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
+    printUsage();
+    return 0;
+  }
+
   const { command, rest, flags } = parseArgs(argv);
   if (!command) {
     printUsage();
@@ -1163,8 +1209,39 @@ const isDirectExecution = isCliDirectExecution({
 });
 
 if (isDirectExecution) {
-  main().then((code) => {
-    process.exit(code);
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+}
+
+async function appendAcceptedControlEvent(
+  controlLogPath: string,
+  runId: string,
+  nodeId: string,
+  attemptId: string,
+  kind: ControlEventKind,
+  source: 'compat-cli' | 'ipc' | 'fallback-outbox' | 'scheduler' | 'recovery-synthesized',
+  payload?: Record<string, unknown>,
+  operationId?: string,
+): Promise<void> {
+  await acceptControlEvent({
+    controlLogPath,
+    runId,
+    nodeId,
+    attemptId,
+    kind,
+    source,
+    payload,
+    operationId,
   });
 }
 
+async function refreshDerivedRuntimeState(controlLogPath: string, runtimeStatePath: string, nodeId: string): Promise<void> {
+  const derived = await deriveRuntimeStateFromControlLog(controlLogPath, nodeId);
+  await writeDerivedRuntimeState(runtimeStatePath, derived);
+}

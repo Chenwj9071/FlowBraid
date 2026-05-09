@@ -6,6 +6,7 @@ import { loadWorkflowFile } from '../src/workflow.js';
 import { createInitialState, createRunWorkspace } from '../src/workspace.js';
 import { main as cliMain } from '../src/cli.js';
 import { getNativeSessionPath, readNativeSessionState } from '../src/native-session.js';
+import { getControlLogPath, readControlEvents } from '../src/control-log.js';
 
 describe('native node CLI protocol', () => {
   it('records node start', async () => {
@@ -28,6 +29,8 @@ describe('native node CLI protocol', () => {
     const state = await readNativeSessionState(getNativeSessionPath(path.join(runDir, 'nodes', 'develop')));
     expect(state.status).toBe('running');
     expect(state.terminalPid).toBe(3001);
+    const controlEvents = await readControlEvents(getControlLogPath(path.join(runDir, 'nodes', 'develop')));
+    expect(controlEvents.some((event) => event.kind === 'attempt.started')).toBe(true);
   });
 
   it('records node complete', async () => {
@@ -53,6 +56,8 @@ describe('native node CLI protocol', () => {
     expect(state.status).toBe('completed');
     expect(state.result?.kind).toBe('complete');
     expect(state.result?.summary).toBe('done');
+    const controlEvents = await readControlEvents(getControlLogPath(path.join(runDir, 'nodes', 'develop')));
+    expect(controlEvents.some((event) => event.kind === 'complete')).toBe(true);
   });
 
   it('records node fail', async () => {
@@ -76,6 +81,8 @@ describe('native node CLI protocol', () => {
     expect(state.status).toBe('failed');
     expect(state.result?.kind).toBe('fail');
     expect(state.result?.message).toBe('verification failed');
+    const controlEvents = await readControlEvents(getControlLogPath(path.join(runDir, 'nodes', 'verify')));
+    expect(controlEvents.some((event) => event.kind === 'fail')).toBe(true);
   });
 
   it('records node artifact events', async () => {
@@ -99,6 +106,8 @@ describe('native node CLI protocol', () => {
     expect(events).toContain('"type":"node.native.artifact"');
     expect(events).toContain('"nodeId":"verify"');
     expect(events).toContain('artifacts\\\\verify-report.md');
+    const controlEvents = await readControlEvents(getControlLogPath(path.join(runDir, 'nodes', 'verify')));
+    expect(controlEvents.some((event) => event.kind === 'artifact')).toBe(true);
   });
 
   it('does not downgrade a completed native session when artifact is reported later', async () => {

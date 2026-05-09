@@ -3,6 +3,7 @@ import os from 'node:os';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
+  buildFlowBraidNodeCommandPrefix,
   buildInteractivePtyCommand,
   buildNativeCodexResumeInvocation,
   buildNativeInteractiveCommand,
@@ -105,5 +106,65 @@ describe('codex command helpers', () => {
     expect(built.args[0]).toBe('resume');
     expect(built.args[1]).toBe('019df466-f6a4-7ec3-a230-9e6bbd5ebeb9');
     expect(built.args).not.toContain('--last');
+  });
+
+  it('uses the stable flowbraid command name for prompt protocol by default', () => {
+    const originalCommand = process.env.FLOWBRAID_NODE_CLI_COMMAND;
+    const originalEntrypointMode = process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT;
+    delete process.env.FLOWBRAID_NODE_CLI_COMMAND;
+    delete process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT;
+
+    try {
+      expect(buildFlowBraidNodeCommandPrefix()).toBe('flowbraid');
+    } finally {
+      if (originalCommand === undefined) {
+        delete process.env.FLOWBRAID_NODE_CLI_COMMAND;
+      } else {
+        process.env.FLOWBRAID_NODE_CLI_COMMAND = originalCommand;
+      }
+      if (originalEntrypointMode === undefined) {
+        delete process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT;
+      } else {
+        process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT = originalEntrypointMode;
+      }
+    }
+  });
+
+  it('supports an explicit prompt command override', () => {
+    const originalCommand = process.env.FLOWBRAID_NODE_CLI_COMMAND;
+    process.env.FLOWBRAID_NODE_CLI_COMMAND = 'fb';
+
+    try {
+      expect(buildFlowBraidNodeCommandPrefix()).toBe('fb');
+    } finally {
+      if (originalCommand === undefined) {
+        delete process.env.FLOWBRAID_NODE_CLI_COMMAND;
+      } else {
+        process.env.FLOWBRAID_NODE_CLI_COMMAND = originalCommand;
+      }
+    }
+  });
+
+  it('can still fall back to the local entrypoint in explicit development mode', () => {
+    const originalCommand = process.env.FLOWBRAID_NODE_CLI_COMMAND;
+    const originalEntrypointMode = process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT;
+    delete process.env.FLOWBRAID_NODE_CLI_COMMAND;
+    process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT = '1';
+
+    try {
+      const built = buildFlowBraidNodeCommandPrefix('win32', ['node', 'D:\\Code\\FlowBraid\\dist\\cli.js']);
+      expect(built).toContain('cli.js');
+    } finally {
+      if (originalCommand === undefined) {
+        delete process.env.FLOWBRAID_NODE_CLI_COMMAND;
+      } else {
+        process.env.FLOWBRAID_NODE_CLI_COMMAND = originalCommand;
+      }
+      if (originalEntrypointMode === undefined) {
+        delete process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT;
+      } else {
+        process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT = originalEntrypointMode;
+      }
+    }
   });
 });

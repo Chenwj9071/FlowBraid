@@ -1,19 +1,28 @@
 {
   "name": "flowbraid",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
     "flowbraid": "./dist/src/cli.js"
   },
+  "files": [
+    "dist",
+    "doc",
+    "examples",
+    "README.md",
+    "AGENTS.md"
+  ],
   "scripts": {
     "dev": "tsx src/cli.ts",
     "demo:pty": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/demo-pty.ps1",
     "demo:native-split": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/demo-native-split.ps1",
     "demo:session": "tsx src/cli.ts run examples/agent-session-demo.workflow.yaml --interactive",
     "test": "vitest run",
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "prepare": "npm run build",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "node-pty": "^1.1.0",

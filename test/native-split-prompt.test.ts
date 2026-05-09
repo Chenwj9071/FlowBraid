@@ -1,4 +1,4 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -86,21 +86,20 @@ nodes:
     expect(prompt).toContain('## Re-entry Evidence');
     expect(prompt).toContain('## Required Commands');
     expect(prompt).toContain('## FlowBraid Protocol Addendum');
-    expect(prompt).not.toContain('Do not assume an exec/review split;');
     expect(prompt).toContain('runtime-state.path:');
     expect(prompt).toContain('latest.runtime-state:');
     expect(prompt).toContain('outcome: reject');
     expect(prompt).toContain('Treat the human feedback comment below as high-priority re-entry guidance.');
     expect(prompt).toContain('HIGH PRIORITY comment: please add a short usage note');
-    expect(prompt).toContain('please add a short usage note');
     expect(prompt).toContain('node complete --run-dir');
     expect(prompt).toContain('--attempt-id "attempt-develop-1"');
     expect(prompt).toContain('node fail --run-dir');
     expect(prompt).toContain('latest.human.feedback:');
     expect(prompt).toContain('Keep the fail `--message` concise and specific.');
     expect(prompt).toContain('exit the current Codex session immediately');
-    expect(prompt).not.toContain('After any terminal command, stop working and exit the session immediately.');
     expect(prompt).not.toContain('verify.report.path');
+    expect(prompt).not.toContain('src/cli.ts');
+    expect(prompt).not.toContain('dist/cli.js');
   });
 
   it('uses a dedicated re-entry prompt for resumed native split sessions', async () => {
@@ -187,14 +186,12 @@ nodes:
     expect(prompt).toContain('## FlowBraid Protocol');
     expect(prompt).toContain('## Re-entry Priority');
     expect(prompt).toContain('## Re-entry Evidence');
-    expect(prompt).not.toContain('Do not assume an exec/review split;');
     expect(prompt).toContain('from:');
     expect(prompt).toContain('reason:');
     expect(prompt).toContain('required action:');
     expect(prompt).toContain('Treat the human feedback comment below as high-priority re-entry guidance.');
     expect(prompt).toContain('HIGH PRIORITY comment: please add a brief usage note');
     expect(prompt).toContain('Original task reference:');
-    expect(prompt).toContain('please add a brief usage note');
     expect(prompt).toContain(originalTask);
   });
 
@@ -255,4 +252,3 @@ nodes:
     expect(prompt).not.toContain('latest.human.feedback:');
   });
 });
-

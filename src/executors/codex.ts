@@ -433,6 +433,15 @@ export function buildFlowBraidNodeCommandPrefix(
   platform: NodeJS.Platform = process.platform,
   cliArgv: string[] = process.argv,
 ): string {
+  const stableCommand = process.env.FLOWBRAID_NODE_CLI_COMMAND?.trim();
+  if (stableCommand) {
+    return stableCommand;
+  }
+
+  if (process.env.FLOWBRAID_PROMPT_USE_ENTRYPOINT?.trim() !== '1') {
+    return 'flowbraid';
+  }
+
   const entryPath = resolveFlowBraidCliEntryPath(cliArgv);
 
   if (entryPath.endsWith('.ts')) {

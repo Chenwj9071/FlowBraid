@@ -2,29 +2,56 @@
 
 FlowBraid 是一个本地优先的 CLI 工作流编排器，面向需要持续执行、人工门禁、节点回流、可恢复执行和可审计日志的开发流程。
 
-## 本地命令安装
+## 安装方式
 
-`npm install` 只会安装依赖，不会自动把 `flowbraid` 命令注册到系统 `PATH`。
+### 1. 本地开发运行
 
-如果要在本机直接使用 `flowbraid` 命令，请执行：
+适合仓库开发和调试：
+
+```bash
+npm install
+npm run dev -- --help
+```
+
+直接运行示例：
+
+```bash
+npm run dev -- run examples/codex-native-split-demo.workflow.yaml
+```
+
+### 2. 从源码仓库安装为本机命令
+
+适合本地长期使用：
 
 ```bash
 npm install
 npm run build
 npm link
+flowbraid --help
 ```
 
-安装完成后可直接验证：
+也可以使用：
 
 ```bash
-flowbraid validate examples/codex-native-split-demo.workflow.yaml
+npm install -g .
+flowbraid --help
 ```
 
-如果只是临时在仓库内运行，也可以不做全局链接，直接执行：
+### 3. 打包后安装
+
+适合发布包验证或离线分发：
 
 ```bash
-node dist/src/cli.js validate examples/codex-native-split-demo.workflow.yaml
+npm pack
+npm install -g .\flowbraid-0.1.0.tgz
+flowbraid --help
 ```
+
+说明：
+
+- `prepare` 和 `prepack` 会自动先执行 `npm run build`
+- CLI 实际入口是 `dist/src/cli.js`
+- 安装后通过 `bin` 暴露成稳定命令名 `flowbraid`
 
 ## 推荐示例
 
@@ -43,14 +70,23 @@ flowbraid run examples/codex-native-split-demo.workflow.yaml --interactive
 5. 验收通过后进入人工审批
 6. 人工可以继续 `approve` 或 `reject` 回流
 
-## 其他示例
+其他示例：
 
 - `npm run demo:pty`
 - `npm run demo:session`
 
-## Workflow 编写指南
+## 常用命令
 
-- 见 [doc/workflow-authoring.md](doc/workflow-authoring.md)
+```bash
+flowbraid validate path/to/workflow.yaml
+flowbraid run path/to/workflow.yaml
+flowbraid run path/to/workflow.yaml --interactive
+flowbraid resume <run-dir>
+flowbraid resume <run-dir> --decision approve
+flowbraid resume <run-dir> --decision reject --message "补充说明"
+flowbraid recover <run-dir>
+flowbraid send <run-dir> "继续执行"
+```
 
 ## 开发验证
 
@@ -58,3 +94,12 @@ flowbraid run examples/codex-native-split-demo.workflow.yaml --interactive
 npm run check
 npm test
 ```
+
+## 相关文档
+
+- 完整使用指南：`doc/user-guide.md`
+- 安装说明：`doc/installation.md`
+- workflow 编写指南：`doc/workflow-authoring.md`
+- 架构说明：`doc/architecture.md`
+- 需求说明：`doc/requirements.md`
+- 当前进展：`doc/progress.md`

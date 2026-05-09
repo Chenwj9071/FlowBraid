@@ -208,6 +208,29 @@ export type NativeSessionStatus = 'launching' | 'running' | 'completed' | 'faile
 
 export type NodeRuntimeStatus = 'launching' | 'running' | 'waiting_input' | 'paused' | 'completed' | 'failed' | 'timed_out' | 'canceled';
 
+export type ControlEventKind =
+  | 'attempt.started'
+  | 'complete'
+  | 'fail'
+  | 'pause'
+  | 'artifact'
+  | 'attempt.superseded'
+  | 'recovery.orphaned'
+  | 'heartbeat';
+
+export interface ControlEventRecord {
+  version: 1;
+  eventId: string;
+  operationId: string;
+  runId: string;
+  nodeId: string;
+  attemptId: string;
+  source: 'compat-cli' | 'ipc' | 'fallback-outbox' | 'scheduler' | 'recovery-synthesized';
+  kind: ControlEventKind;
+  at: string;
+  payload?: Record<string, unknown>;
+}
+
 export interface NodeRuntimeState {
   nodeId: string;
   attemptId?: string;

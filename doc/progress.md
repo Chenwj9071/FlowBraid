@@ -1,13 +1,16 @@
-﻿# FlowBraid 项目进展记录
+# FlowBraid 项目进展记录
 
 ## 记录目的
+
 用于快速告诉后续 agent：
+
 - 当前项目已经做到哪一步
 - 哪些闭环已经验证过
 - 最近一次重点改动是什么
 - 接下来最合理的推进方向是什么
 
 ## 当前状态
+
 - 已完成首版工程骨架
 - 已完成 workflow 解析、状态落盘、`shell` 执行器、`codex` 任务执行器和 CLI 调度
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点
@@ -28,10 +31,11 @@
 - `codex` 提示词已从角色化约束收敛为流程协议约束，回流时显式注入来源、原因和必需动作，终态命令触发条件也已改为强约束表述
 - `codex` 提示词已进一步重构为 `FlowBraid Protocol` / `Re-entry Priority` / `Re-entry Evidence` / `Task Reference` / `Required Commands` / `FlowBraid Protocol Addendum` 分段式结构，并移除了 `verify.report` 残留
 - 已新增 `development-experience-and-pitfalls.md`，归档本轮开发、设计和编码问题的避坑指南，并提炼可执行规范
-- 已通过本地 `npm link` 安装 `flowbraid` 命令，并用已编译产物把 native split 示例继续跑到 `completed`
-- 已通过安装后的 `flowbraid` 命令直接跑通 `examples/codex-native-split-demo.workflow.yaml`，包括两轮审批回流，最终到 `completed`
+- 已完成控制通道重构 v3 方案收敛，唯一真源方向确定为 `nodes/<node-id>/state/control-log.jsonl`
+- 已通过安装后的 `flowbraid` 命令跑通 `examples/codex-native-split-demo.workflow.yaml`，包括审批回流，最终到 `completed`
 
 ## 已完成里程碑
+
 1. 冻结需求、架构和技术选型文档
 2. 建立 Node.js + TypeScript 工程骨架
 3. 实现 workflow 解析与图校验
@@ -50,8 +54,11 @@
 16. 为 `codex` 节点补上通用 `runtime-state.json`、`node.state` 事件和 `complete --outcome`
 17. 主示例与 native split 主路径已迁移为 outcome 驱动，不再依赖 `review verdict` 作为唯一流转真源
 18. 新增 `terminalCloseGraceMs` 并补齐相关回归测试
+19. 新增 `recover` 异常恢复入口
+20. 引入 `control-log.jsonl` 作为控制通道真源方向，并完成兼容路径接入
 
 ## 已验证内容
+
 - `npx tsc -p tsconfig.json --noEmit` 通过
 - `npm run check` 通过
 - `npm test` 通过
@@ -63,6 +70,11 @@
   - native split 回流恢复
   - attempt 隔离
   - 终端延时关闭
+- `recover` 已覆盖自动诊断、人工恢复决策和恢复后续跑测试
+- control-log 已覆盖：
+  - CLI 兼容命令写入控制事件
+  - 从 control-log 派生 `runtime-state.json`
+  - 同节点回流时记录多次 `attempt.started`
 - native split 已验证：
   - 节点完成后终端正常关闭
   - Windows 终端关闭失败不会覆盖已完成 outcome
@@ -72,6 +84,7 @@
   - 主进程启动 native codex 节点后会主动探测并持久化最新 `sessionId`
 
 ## 当前默认行为
+
 - workflow 文件所在目录是默认工作目录
 - run workspace 默认落在该目录下的 `.flowbraid-runs/`
 - `gate` / `approval` 使用 `resume` 继续
@@ -84,7 +97,9 @@
 - `recover` 是面向异常中断 run 的恢复入口，不是正常 paused 流程的替代命令
 
 ## 最近一次重点改动
-- 新增 `nodes/<node-id>/state/runtime-state.json`
+
+- 新增 `nodes/<node-id>/state/control-log.jsonl`
+- `runtime-state.json` 已开始作为 control-log 派生快照使用
 - `flowbraid node complete` 已支持 `--outcome`
 - 调度器已优先读取当前 attempt 的 `runtime-state` 和最新 `outcome` 决定流转
 - `codex` prompt 已统一注入 outcome 上报命令：
@@ -93,7 +108,7 @@
   - `--outcome reject`
 - 主示例 `examples/codex-native-split-demo.workflow.yaml`、`examples/codex-pty-demo.workflow.yaml` 已切到新协议说明
 - `workflow-authoring.md` 已更新为 outcome 主路径写法，`mode: exec|review` 仅作为历史说明
-- `flowbraid` 命令已在本机 link 成功，并完成一次不依赖源码入口的 native split 示例闭环验证
+- `flowbraid` 命令已可通过安装态直接用于 native split 示例闭环验证
 - 新增 `terminalCloseGraceMs`，native split 收到终态后默认等待 `1500ms` 再请求关闭终端
 - Windows 终端关闭命令新增 `AbortSignal` 兜底，主进程超时后可中断关闭子进程
 - 交互式 CLI 的主调度日志与收尾状态输出改为显式清行 + CRLF 写入，提升 Windows 下 approval 后的光标稳定性
@@ -106,6 +121,7 @@
 - `waitForNativeSession()` 不再按 `nodeId` 消费“最近一条完成事件”，而是只接受当前 `attemptId` 的 session 状态或事件
 - `cli node start|complete|fail|pause|artifact|heartbeat` 已补 `--attempt-id`
 - `codex` native prompt 已注入 `--attempt-id`
+- `cli node *` 兼容路径已开始接入 `control-log.jsonl`
 - 修复 native split 测试桩，确保测试中的 session 状态写入当前 attemptId
 - `codex` 节点新增 `reentry.mode: resume|new_with_history|new`
 - native split 启动后主进程会按 `workdir + startedAt` 主动探测新会话 `sessionId`，并写入：
@@ -115,6 +131,7 @@
 - 新增 `flowbraid recover <run-dir>`，支持 `retry-current / continue-next / fail-run` 三种人工恢复动作
 
 ## 后续建议
+
 1. 继续删除 `mode: exec|review` 的主路径依赖，最终仅保留必要的历史兼容说明或彻底移除
 2. 把 `workflow-authoring.md`、`requirements.md`、`architecture.md` 进一步收紧为以 outcome 为主的状态机表述
 3. 为 `timeline.json` 增加更明确的 CLI 展示或调试输出
@@ -122,8 +139,7 @@
 5. 继续补强 `recover` 在真实 native split 会话恢复场景下的端到端验证与交互体验
 
 ## 维护规则
+
 - 每次做完一轮明确功能，更新这里
 - 如果默认行为或状态协议变了，先更新这里，再改代码
 - 新 agent 启动前优先读取本文件，避免沿用过期上下文
-
-

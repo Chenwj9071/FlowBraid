@@ -210,18 +210,6 @@ function tryReadPromptRuntimeStateSync(filePath: string, maxChars = 2000): strin
   }
 }
 
-function tryReadPromptContextSync(filePath: string, maxChars = 4000): string | null {
-  try {
-    const content = readFileSync(filePath, 'utf8').trim();
-    if (!content) {
-      return null;
-    }
-    return content.length > maxChars ? `${content.slice(0, maxChars)}\n[truncated]` : content;
-  } catch {
-    return null;
-  }
-}
-
 function tryReadLastHumanFeedbackSync(filePath: string, maxChars = 2000): string | null {
   try {
     const raw = readFileSync(filePath, 'utf8').trim();
