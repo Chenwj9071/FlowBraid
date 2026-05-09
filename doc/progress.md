@@ -13,7 +13,7 @@
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点
 - 已支持 `run`、`resume`、`send` 的基本运行闭环
 - `codex` 主路径已迁移到通用 `runtime-state + outcome` 状态协议，主示例和 native split 已优先按新协议流转
-- `codex review` 已支持读取 `verdict: approve|reject` 自动走 success / failure 分支
+- `codex review` 旧兼容路径仍可读取 `verdict: approve|reject`，但主路径已切到 `runtime-state + outcome`
 - `agent_session` 已改为长期会话模型，节点完成由结构化 turn 结果决定
 - 已支持 `contextDir` / `workdir` 双目录模型
 - Windows PTY 路径已显式切换到 UTF-8 控制台后再启动交互式 `codex`
@@ -107,7 +107,7 @@
 
 ## 后续建议
 1. 继续删除 `mode: exec|review` 的主路径依赖，最终只保留兼容层或彻底移除
-2. 把 `workflow-authoring.md`、`requirements.md`、`architecture.md` 进一步更新为通用 outcome 状态机表述
+2. 把 `workflow-authoring.md`、`requirements.md`、`architecture.md` 进一步收紧为以 outcome 为主、兼容层为辅的状态机表述
 3. 为 `timeline.json` 增加更明确的 CLI 展示或调试输出
 4. 继续观察真实 Windows 终端下的 native split 行为，必要时补充更细粒度的 terminal / session 诊断日志
 

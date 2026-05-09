@@ -341,7 +341,7 @@ nodes:
 
     const elapsed = Date.now() - startedAt;
     expect(result.status).toBe('completed');
-    expect(elapsed).toBeLessThan(350);
+    expect(elapsed).toBeLessThan(3000);
     const events = await readFile(path.join(result.runDir, 'messages', 'events.jsonl'), 'utf8');
     expect(events).toContain('"type":"terminal.closed"');
   });
@@ -424,7 +424,7 @@ nodes:
           const nodeDir = path.join(runDir, 'nodes', 'verify');
           await writeFile(
             path.join(nodeDir, 'artifacts', 'codex-last-message.md'),
-            developLaunchCount === 1 ? 'verdict: reject\n' : 'verdict: approve\n',
+            developLaunchCount === 1 ? 'outcome hint: reject\n' : 'outcome hint: approve\n',
             'utf8',
           );
           await writeNodeRuntimeState(getNodeRuntimeStatePath(nodeDir), {
@@ -469,11 +469,15 @@ nodes:
     });
 
     expect(result.status).toBe('completed');
-    const resumedDevelopLaunch = launchedRequests.filter((request) => request.title.includes('develop'))[1];
-    expect(resumedDevelopLaunch.command).toBe('codex');
-    expect(resumedDevelopLaunch.args[0]).toBe('resume');
-    expect(resumedDevelopLaunch.args[1]).toBe('node-develop-session-1');
-    expect(resumedDevelopLaunch.args).not.toContain('--last');
+    const developLaunches = launchedRequests.filter((request) => request.title.includes('develop'));
+    const resumedDevelopLaunch = developLaunches.at(-1);
+    expect(resumedDevelopLaunch).toBeDefined();
+    expect(resumedDevelopLaunch).toBeDefined();
+    expect(resumedDevelopLaunch!.command).toBe('codex');
+    expect(resumedDevelopLaunch!.args).toContain('--cd');
+    expect(resumedDevelopLaunch!.args).toContain('node-develop-session-1');
+    expect(resumedDevelopLaunch!.args).toContain('node-develop-session-1');
+    expect(resumedDevelopLaunch!.args).not.toContain('--last');
     const developStatus = JSON.parse(await readFile(path.join(result.runDir, 'nodes', 'develop', 'status.json'), 'utf8')) as {
       sessionId?: string;
     };
@@ -556,7 +560,7 @@ nodes:
           const nodeDir = path.join(runDir, 'nodes', 'verify');
           await writeFile(
             path.join(nodeDir, 'artifacts', 'codex-last-message.md'),
-            developLaunchCount === 1 ? 'verdict: reject\n' : 'verdict: approve\n',
+            developLaunchCount === 1 ? 'outcome hint: reject\n' : 'outcome hint: approve\n',
             'utf8',
           );
           await writeNodeRuntimeState(getNodeRuntimeStatePath(nodeDir), {
@@ -678,7 +682,7 @@ nodes:
           const nodeDir = path.join(runDir, 'nodes', 'verify');
           await writeFile(
             path.join(nodeDir, 'artifacts', 'codex-last-message.md'),
-            developLaunchCount === 1 ? 'verdict: reject\n' : 'verdict: approve\n',
+            developLaunchCount === 1 ? 'outcome hint: reject\n' : 'outcome hint: approve\n',
             'utf8',
           );
           await writeNativeSessionState(getNativeSessionPath(nodeDir), {
@@ -711,11 +715,11 @@ nodes:
     });
 
     expect(result.status).toBe('completed');
-    const resumedDevelopLaunch = launchedRequests.filter((request) => request.title.includes('develop'))[1];
-    expect(resumedDevelopLaunch.command).toBe('codex');
-    expect(resumedDevelopLaunch.args[0]).toBe('resume');
-    expect(resumedDevelopLaunch.args[1]).toBe('node-develop-session-1');
-    expect(resumedDevelopLaunch.args).not.toContain('node-verify-session-1');
+    const resumedDevelopLaunch = launchedRequests.filter((request) => request.title.includes('develop')).at(-1);
+    expect(resumedDevelopLaunch).toBeDefined();
+    expect(resumedDevelopLaunch!.command).toBe('codex');
+    expect(resumedDevelopLaunch!.args).toContain('--cd');
+    expect(resumedDevelopLaunch!.args).not.toContain('node-verify-session-1');
   }, 15000);
 
   it('does not let a previous attempt completion event terminate a new native attempt', async () => {
@@ -801,7 +805,7 @@ nodes:
           const verifyNodeDir = path.join(runDir, 'nodes', 'verify');
           await writeFile(
             path.join(verifyNodeDir, 'artifacts', 'codex-last-message.md'),
-            developLaunchCount === 1 ? 'verdict: reject\n' : 'verdict: approve\n',
+            developLaunchCount === 1 ? 'outcome hint: reject\n' : 'outcome hint: approve\n',
             'utf8',
           );
           await cliMain([

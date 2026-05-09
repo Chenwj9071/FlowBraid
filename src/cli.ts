@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import process from 'node:process';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { loadWorkflowFile, WorkflowError } from './workflow.js';
@@ -840,6 +841,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 }
 
+export function isCliDirectExecution(options: {
+  entryScript?: string;
+  moduleUrl: string;
+  realPathResolver?: (candidate: string) => string;
+}): boolean {
+  const { entryScript, moduleUrl, realPathResolver = defaultRealPathResolver } = options;
+  if (!entryScript) {
+    return false;
+  }
+
+  try {
+    const resolvedEntry = realPathResolver(path.resolve(entryScript));
+    return pathToFileURL(resolvedEntry).href === moduleUrl;
+  } catch {
+    return false;
+  }
+}
+
 function createInterruptContext(): {
   controller: AbortController;
   dispose: () => void;
@@ -918,8 +937,19 @@ async function failRun(runDir: string, reason: string): Promise<void> {
   );
 }
 
+function defaultRealPathResolver(candidate: string): string {
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
+}
+
 const entryScript = process.argv[1];
-const isDirectExecution = !!entryScript && import.meta.url === pathToFileURL(path.resolve(entryScript)).href;
+const isDirectExecution = isCliDirectExecution({
+  entryScript,
+  moduleUrl: import.meta.url,
+});
 
 if (isDirectExecution) {
   main().then((code) => {

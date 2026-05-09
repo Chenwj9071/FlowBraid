@@ -1,5 +1,5 @@
 ﻿import path from 'node:path';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import {
   runCodexTask,
   buildNativeCodexCliInvocation,
@@ -278,26 +278,6 @@ export class FlowBraidEngine {
                   outcome = 'failure';
                   detail = runtimeState.reason ?? runtimeState.error ?? `node ended with status ${runtimeState.status}`;
                   nextNodeId = this.resolveNodeNextFromRuntime(node, runtimeState);
-                }
-              } else if (node.mode === 'review') {
-                const reviewResult = await readReviewVerdict(
-                  path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'),
-                  nodeState.startedAt,
-                );
-                this.options.logger?.(
-                  `[review] node ${currentNodeId} report=${reviewResult.filePath} updatedAt=${reviewResult.updatedAt ?? 'missing'} verdict=${reviewResult.verdict ?? 'null'} stale=${reviewResult.stale}`,
-                );
-                if (reviewResult.verdict === 'reject') {
-                  outcome = 'failure';
-                  detail = 'review verdict=reject';
-                } else if (reviewResult.verdict === 'approve') {
-                  detail = 'review verdict=approve';
-                } else if (reviewResult.stale) {
-                  outcome = 'failure';
-                  detail = 'codex review completed, but the review report was not updated in this attempt';
-                } else {
-                  outcome = 'failure';
-                  detail = 'codex review 完成，但未声明 verdict';
                 }
               } else {
                 detail = `codex ${node.mode ?? 'task'} 瀹屾垚`;
@@ -726,46 +706,6 @@ export class FlowBraidEngine {
       }
     }
 
-    if (node.mode === 'review') {
-      const reviewResult = await readReviewVerdict(
-        path.join(nodeArtifactsDir, node.outputFile ?? 'codex-last-message.md'),
-        startedAt,
-      );
-      this.options.logger?.(
-        `[review] node ${nodeId} report=${reviewResult.filePath} updatedAt=${reviewResult.updatedAt ?? 'missing'} verdict=${reviewResult.verdict ?? 'null'} stale=${reviewResult.stale}`,
-      );
-      if (reviewResult.verdict === 'reject') {
-        return {
-          exitCode: 0,
-          signal: null,
-          outcome: 'failure',
-          detail: 'review verdict=reject',
-        };
-      }
-      if (reviewResult.verdict === 'approve') {
-        return {
-          exitCode: 0,
-          signal: null,
-          outcome: 'success',
-          detail: 'review verdict=approve',
-        };
-      }
-      if (reviewResult.stale) {
-        return {
-          exitCode: 1,
-          signal: null,
-          outcome: 'failure',
-          detail: 'native codex review completed, but the review report was not updated in this attempt',
-        };
-      }
-      return {
-        exitCode: 1,
-        signal: null,
-        outcome: 'failure',
-        detail: 'native codex review completed without verdict',
-      };
-    }
-
     return {
       exitCode: 0,
       signal: null,
@@ -1100,9 +1040,7 @@ export class FlowBraidEngine {
     }
 
     const requiredAction =
-      node.mode === 'review'
-        ? 'Use the current review inputs, update the report or verdict artifact as needed, and then report the final node outcome with the required FlowBraid command.'
-        : 'Apply the re-entry feedback to the shared deliverable, write any required artifact, and then report the final node outcome with the required FlowBraid command.';
+      'Apply the re-entry feedback to the shared deliverable, write any required artifact, and then report the final node outcome with the required FlowBraid command.';
 
     return {
       fromNodeId: previousEntry.nodeId,
@@ -1167,48 +1105,6 @@ export class FlowBraidEngine {
     }
     Object.assign(target, patch);
     await persistRunTimeline(workspace, timeline);
-  }
-}
-
-export async function readReviewVerdict(
-  filePath: string,
-  notBefore?: string,
-): Promise<{ filePath: string; verdict: 'approve' | 'reject' | null; updatedAt?: string; stale: boolean }> {
-  try {
-    const fileStat = await stat(filePath);
-    const updatedAt = new Date(fileStat.mtimeMs).toISOString();
-    if (notBefore && fileStat.mtimeMs < Date.parse(notBefore)) {
-      return {
-        filePath,
-        verdict: null,
-        updatedAt,
-        stale: true,
-      };
-    }
-
-    const content = await readFile(filePath, 'utf8');
-    const matches = [...content.matchAll(/verdict\s*[:=]\s*(approve|reject)/giu)];
-    const matched = matches.at(-1);
-    if (!matched) {
-      return {
-        filePath,
-        verdict: null,
-        updatedAt,
-        stale: false,
-      };
-    }
-    return {
-      filePath,
-      verdict: matched[1].toLowerCase() as 'approve' | 'reject',
-      updatedAt,
-      stale: false,
-    };
-  } catch {
-    return {
-      filePath,
-      verdict: null,
-      stale: false,
-    };
   }
 }
 
