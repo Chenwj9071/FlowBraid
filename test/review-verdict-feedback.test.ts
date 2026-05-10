@@ -116,12 +116,12 @@ start: develop
 nodes:
   develop:
     type: codex
-    prompt: 寮€鍙?calc.js锛岃緭鍑?a+b 鐨勫€?
+    prompt: 开发 calc.js，输出 a+b 的值
     outputFile: develop.md
     next: verify
   verify:
     type: codex
-    prompt: 楠屾敹 calc.js锛屽苟杈撳嚭 outcome
+    prompt: 验收 calc.js，并输出 outcome
     outputFile: verify-report.md
     transitions:
       success: approve

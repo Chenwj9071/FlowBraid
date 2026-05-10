@@ -9,6 +9,13 @@ import { getNativeSessionPath, writeNativeSessionState } from '../src/native-ses
 import { getNodeRuntimeStatePath, writeNodeRuntimeState } from '../src/node-runtime.js';
 
 describe('codex native split demo', () => {
+  it('ships a readable Chinese review prompt in the example workflow', async () => {
+    const workflowText = await readFile(path.resolve('examples/codex-native-split-demo.workflow.yaml'), 'utf8');
+    expect(workflowText).toContain('这是 develop 完成后的人工审核节点。');
+    expect(workflowText).toContain('- approve：继续进入 verify 节点做自动化验收');
+    expect(workflowText).toContain('- reject：回到 develop 节点继续修改');
+  });
+
   it('supports verify rejection, human reject feedback, and final completion in native-split mode', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-split-demo-'));
     const workflowDir = path.join(tempRoot, 'workspace');
@@ -37,9 +44,11 @@ describe('codex native split demo', () => {
           expect(request.args[0]).toBe('resume');
           expect(request.args[1]).toBe(expectedSessionId);
           expect(request.args).not.toContain('--last');
-          expect(request.args.at(-1)).toContain('FlowBraid node protocol:');
-          expect(request.args.at(-1)).toContain('Re-entry context:');
-          expect(request.args.at(-1)).toContain('Command triggers:');
+          expect(request.args.at(-1)).toContain('## FlowBraid Protocol');
+          expect(request.args.at(-1)).toContain('## Re-entry Priority');
+          expect(request.args.at(-1)).toContain('## Required Commands');
+          expect(request.args.at(-1)).toContain('node fail --run-dir');
+          expect(request.args.at(-1)).toContain('--message "explain the failure"');
         }
         setTimeout(async () => {
           const runDirs = await readDirNames(workspaceRoot);

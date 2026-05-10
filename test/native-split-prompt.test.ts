@@ -38,10 +38,20 @@ nodes:
     const runWorkspace = await createRunWorkspace(workspaceRoot, workflow);
     await createInitialState(runWorkspace, workflow);
 
-    await mkdir(path.join(runWorkspace.nodesDir, 'verify', 'artifacts'), { recursive: true });
+    await mkdir(path.join(runWorkspace.nodesDir, 'develop', 'state'), { recursive: true });
     await writeFile(
-      path.join(runWorkspace.nodesDir, 'verify', 'artifacts', 'verify-report.md'),
-      'outcome hint: reject\ncomments are missing\n',
+      path.join(runWorkspace.nodesDir, 'develop', 'state', 'runtime-state.json'),
+      JSON.stringify(
+        {
+          nodeId: 'develop',
+          attemptId: 'attempt-develop-0',
+          status: 'completed',
+          outcome: 'reject',
+          summary: 'previous attempt rejected',
+        },
+        null,
+        2,
+      ),
       'utf8',
     );
     await writeFile(
@@ -72,20 +82,25 @@ nodes:
       },
     );
 
-    expect(prompt).toContain('FlowBraid node protocol:');
-    expect(prompt).toContain('Command triggers:');
-    expect(prompt).toContain('Native split terminal protocol:');
+    expect(prompt).toContain('## FlowBraid Protocol');
+    expect(prompt).toContain('## Re-entry Evidence');
+    expect(prompt).toContain('## Required Commands');
+    expect(prompt).toContain('## FlowBraid Protocol Addendum');
+    expect(prompt).not.toContain('Do not assume an exec/review split;');
+    expect(prompt).toContain('runtime-state.path:');
+    expect(prompt).toContain('latest.runtime-state:');
+    expect(prompt).toContain('outcome: reject');
+    expect(prompt).toContain('Treat the human feedback comment below as high-priority re-entry guidance.');
+    expect(prompt).toContain('HIGH PRIORITY comment: please add a short usage note');
+    expect(prompt).toContain('please add a short usage note');
     expect(prompt).toContain('node complete --run-dir');
     expect(prompt).toContain('--attempt-id "attempt-develop-1"');
     expect(prompt).toContain('node fail --run-dir');
-    expect(prompt).toContain('latest.verify.report:');
-    expect(prompt).toContain('outcome hint: reject');
     expect(prompt).toContain('latest.human.feedback:');
-    expect(prompt).toContain('please add a short usage note');
-    expect(prompt).toContain('Exit the session immediately only after reporting a final complete or fail state.');
-    expect(prompt).toContain('exit the current codex session immediately');
+    expect(prompt).toContain('Keep the fail `--message` concise and specific.');
+    expect(prompt).toContain('exit the current Codex session immediately');
     expect(prompt).not.toContain('After any terminal command, stop working and exit the session immediately.');
-    expect(prompt).not.toContain('node artifact --run-dir');
+    expect(prompt).not.toContain('verify.report.path');
   });
 
   it('uses a dedicated re-entry prompt for resumed native split sessions', async () => {
@@ -118,10 +133,20 @@ nodes:
     const workflow = await loadWorkflowFile(workflowFile);
     const runWorkspace = await createRunWorkspace(workspaceRoot, workflow);
     await createInitialState(runWorkspace, workflow);
-    await mkdir(path.join(runWorkspace.nodesDir, 'verify', 'artifacts'), { recursive: true });
+    await mkdir(path.join(runWorkspace.nodesDir, 'develop', 'state'), { recursive: true });
     await writeFile(
-      path.join(runWorkspace.nodesDir, 'verify', 'artifacts', 'verify-report.md'),
-      'outcome hint: reject\ncomments are missing\n',
+      path.join(runWorkspace.nodesDir, 'develop', 'state', 'runtime-state.json'),
+      JSON.stringify(
+        {
+          nodeId: 'develop',
+          attemptId: 'attempt-develop-0',
+          status: 'completed',
+          outcome: 'reject',
+          summary: 'previous attempt rejected',
+        },
+        null,
+        2,
+      ),
       'utf8',
     );
     await writeFile(
@@ -159,13 +184,18 @@ nodes:
       },
     );
 
-    expect(prompt).toContain('FlowBraid node protocol:');
-    expect(prompt).toContain('Re-entry context:');
+    expect(prompt).toContain('## FlowBraid Protocol');
+    expect(prompt).toContain('## Re-entry Priority');
+    expect(prompt).toContain('## Re-entry Evidence');
+    expect(prompt).not.toContain('Do not assume an exec/review split;');
     expect(prompt).toContain('from:');
     expect(prompt).toContain('reason:');
     expect(prompt).toContain('required action:');
+    expect(prompt).toContain('Treat the human feedback comment below as high-priority re-entry guidance.');
+    expect(prompt).toContain('HIGH PRIORITY comment: please add a brief usage note');
+    expect(prompt).toContain('Original task reference:');
     expect(prompt).toContain('please add a brief usage note');
-    expect(prompt).toContain(`Task:\n${originalTask}`);
+    expect(prompt).toContain(originalTask);
   });
 
   it('supports minimal re-entry prompt without historical context', async () => {
@@ -219,9 +249,9 @@ nodes:
       },
     );
 
-    expect(prompt).toContain('FlowBraid node protocol:');
-    expect(prompt).not.toContain('Re-entry context:');
-    expect(prompt).not.toContain('latest.verify.report:');
+    expect(prompt).toContain('## FlowBraid Protocol');
+    expect(prompt).not.toContain('## Re-entry Priority');
+    expect(prompt).not.toContain('## Re-entry Evidence');
     expect(prompt).not.toContain('latest.human.feedback:');
   });
 });

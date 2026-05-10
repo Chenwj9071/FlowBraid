@@ -25,8 +25,10 @@
 - 主示例已收敛为 develop -> verify -> approval 的 outcome 驱动回流闭环
 - CLI 交互式输出已切换为统一行写入器，避免 approval / resume / send 之后的 scheduler 日志粘行或覆盖前一行
 - `codex` 提示词已从角色化约束收敛为流程协议约束，回流时显式注入来源、原因和必需动作，终态命令触发条件也已改为强约束表述
+- `codex` 提示词已进一步重构为 `FlowBraid Protocol` / `Re-entry Priority` / `Re-entry Evidence` / `Task Reference` / `Required Commands` / `FlowBraid Protocol Addendum` 分段式结构，并移除了 `verify.report` 残留
 - 已新增 `development-experience-and-pitfalls.md`，归档本轮开发、设计和编码问题的避坑指南，并提炼可执行规范
 - 已通过本地 `npm link` 安装 `flowbraid` 命令，并用已编译产物把 native split 示例继续跑到 `completed`
+- 已通过安装后的 `flowbraid` 命令直接跑通 `examples/codex-native-split-demo.workflow.yaml`，包括两轮审批回流，最终到 `completed`
 
 ## 已完成里程碑
 1. 冻结需求、架构和技术选型文档

@@ -41,7 +41,7 @@ import { RunInterruptedError, isAbortSignalTriggered } from './errors.js';
 import { appendAgentSessionMessage, getAgentSessionPaths, readAgentSessionMessages, readAgentSessionState, writeAgentSessionState } from './agent-session.js';
 import { runCodexSessionTurn } from './session-providers/codex.js';
 import { createExternalTerminalLauncher } from './terminal-launchers/index.js';
-import { buildCodexPrompt } from './codex-prompt.js';
+import { buildCodexPrompt, buildNewSessionReentryPrompt } from './codex-prompt.js';
 import type { CodexPromptReentryContext } from './codex-prompt.js';
 import {
   appendNativeNodeEvent,
@@ -91,16 +91,16 @@ export class FlowBraidEngine {
 
     const currentNode = state.currentNodeId ? this.workflow.nodes[state.currentNodeId] : null;
     if (!state.pendingNodeId && currentNode?.type !== 'approval') {
-      throw new Error('杩愯鐘舵€佷负 paused锛屼絾 pendingNodeId 涓虹┖锛屾棤娉?resume');
+      throw new Error('运行状态为 paused，但 pendingNodeId 为空，无法 resume');
     }
     if (currentNode?.type === 'approval' && !this.options.approvalDecision) {
-      throw new Error('approval 鑺傜偣闇€瑕侀€氳繃 --decision approve|reject 鎸囧畾浜哄伐纭缁撴灉');
+      throw new Error('approval 节点需要通过 --decision approve|reject 指定人工确认结果');
     }
     if (currentNode?.type === 'approval' && this.options.approvalDecision === 'reject' && !this.options.approvalComment) {
       throw new Error('approval 节点 reject 时必须提供打回意见');
     }
     if (currentNode?.type === 'agent_session') {
-      throw new Error('agent_session 鑺傜偣璇蜂娇鐢?send 缁х画瀵硅瘽锛岃€屼笉鏄?resume');
+      throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
     }
 
     state.status = 'running';
@@ -129,19 +129,19 @@ export class FlowBraidEngine {
     const state = await loadRunState(workspace);
 
     if (state.status !== 'paused' || !state.currentNodeId) {
-      throw new Error('褰撳墠 run 涓嶆槸绛夊緟杈撳叆鐘舵€侊紝鏃犳硶 send');
+      throw new Error('当前 run 不是等待输入状态，无法 send');
     }
 
     const currentNode = manifest.workflow.nodes[state.currentNodeId];
     if (currentNode?.type !== 'agent_session') {
-      throw new Error(`褰撳墠鏆傚仠鑺傜偣涓嶆槸 agent_session锛岃€屾槸 ${currentNode?.type ?? 'unknown'}`);
+      throw new Error(`当前暂停节点不是 agent_session，而是 ${currentNode?.type ?? 'unknown'}`);
     }
 
     const nodeDir = path.join(workspace.nodesDir, state.currentNodeId);
     const { inboxPath, sessionStatePath } = getAgentSessionPaths(nodeDir);
     const sessionState = await readAgentSessionState(sessionStatePath);
     if (sessionState.status !== 'waiting_input') {
-      throw new Error(`agent_session 褰撳墠鐘舵€佷笉鏄?waiting_input锛岃€屾槸 ${sessionState.status}`);
+      throw new Error(`agent_session 当前状态不是 waiting_input，而是 ${sessionState.status}`);
     }
 
     const nextTurn = sessionState.turnCount + 1;
@@ -184,7 +184,7 @@ export class FlowBraidEngine {
 
       if (state.stepCount >= maxSteps) {
         state.status = 'failed';
-        state.failedReason = `瓒呰繃鏈€澶ф楠ゆ暟 ${maxSteps}`;
+        state.failedReason = `超过最大步骤数 ${maxSteps}`;
         await persistRunState(workspace, state);
         return this.finalize(workspace, state);
       }
@@ -192,7 +192,7 @@ export class FlowBraidEngine {
       const node = this.workflow.nodes[currentNodeId];
       if (!node) {
         state.status = 'failed';
-        state.failedReason = `鎵句笉鍒拌妭鐐?${currentNodeId}`;
+        state.failedReason = `找不到节点 ${currentNodeId}`;
         await persistRunState(workspace, state);
         return this.finalize(workspace, state);
       }
@@ -242,7 +242,7 @@ export class FlowBraidEngine {
           signal = execution.signal;
           if ((exitCode ?? 1) !== 0) {
             outcome = 'failure';
-            detail = `shell 閫€鍑虹爜 ${exitCode ?? 'null'}`;
+            detail = `shell 退出码 ${exitCode ?? 'null'}`;
           }
           nextNodeId = resolveNodeNext(node, outcome === 'failure' ? 'failure' : 'success');
         } else if (node.type === 'codex') {
@@ -259,7 +259,7 @@ export class FlowBraidEngine {
             signal = execution.signal;
             if ((exitCode ?? 1) !== 0) {
               outcome = 'failure';
-              detail = `codex 閫€鍑虹爜 ${exitCode ?? 'null'}`;
+              detail = `codex 退出码 ${exitCode ?? 'null'}`;
             } else {
               const runtimeState = await this.readCurrentNodeRuntimeState(nodeDir, attemptId);
               if (runtimeState && (runtimeState.outcome || runtimeState.status !== 'running')) {
@@ -300,12 +300,12 @@ export class FlowBraidEngine {
           }
         } else if (node.type === 'gate') {
           outcome = 'paused';
-          detail = node.prompt ?? '绛夊緟浜哄伐纭';
+          detail = node.prompt ?? '等待人工确认';
           nextNodeId = resolveNodeNext(node, 'default');
         } else if (node.type === 'approval') {
           if (!approvalDecision) {
             outcome = 'paused';
-            detail = node.prompt ?? '绛夊緟浜哄伐纭';
+            detail = node.prompt ?? '等待人工确认';
             nextNodeId = null;
           } else {
             outcome = 'success';
@@ -316,7 +316,7 @@ export class FlowBraidEngine {
           }
         } else if (node.type === 'end') {
           outcome = 'success';
-          detail = node.message ?? 'workflow 缁撴潫';
+          detail = node.message ?? 'workflow 结束';
           nextNodeId = null;
         }
       } catch (error) {
@@ -502,13 +502,20 @@ export class FlowBraidEngine {
     const previousSession = await this.readResumableNativeSession(nodeDir);
     const reentryMode = this.resolveCodexReentryMode(node, previousSession);
     const reentryContext = await this.buildCodexReentryContext(workspace, nodeId, attemptId, node, previousSession);
-    const prompt = buildCodexPrompt(this.workflow, nodeId, attemptId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
-      protocolMode: 'native-split',
-      resumeSession: reentryMode === 'resume',
-      reentryMode,
-      includeReentryHistory: reentryMode !== 'new',
-      reentryContext: reentryContext ?? undefined,
-    });
+    const prompt =
+      reentryMode === 'resume'
+        ? buildCodexPrompt(this.workflow, nodeId, attemptId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
+            protocolMode: 'native-split',
+            resumeSession: true,
+            reentryMode,
+            includeReentryHistory: true,
+            reentryContext: reentryContext ?? undefined,
+          })
+        : buildNewSessionReentryPrompt(this.workflow, nodeId, attemptId, node, nodeDir, nodeArtifactsDir, workspace, dirs, {
+            protocolMode: 'native-split',
+            includeHistory: reentryMode !== 'new',
+            reentryContext: reentryContext ?? undefined,
+          });
     const invocation = reentryMode === 'resume'
       ? buildNativeCodexResumeInvocation({
           command: this.options.codexCommand,

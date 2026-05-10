@@ -475,6 +475,11 @@ nodes:
     expect(resumedDevelopLaunch!.args).toContain('node-develop-session-1');
     expect(resumedDevelopLaunch!.args).toContain('node-develop-session-1');
     expect(resumedDevelopLaunch!.args).not.toContain('--last');
+    expect(resumedDevelopLaunch!.args.at(-1)).toContain('## Re-entry Priority');
+    expect(resumedDevelopLaunch!.args.at(-1)).toContain('## Required Commands');
+    expect(resumedDevelopLaunch!.args.at(-1)).toContain('node fail --run-dir');
+    expect(resumedDevelopLaunch!.args.at(-1)).toContain('--message "explain the failure"');
+    expect(resumedDevelopLaunch!.args.at(-1)).not.toContain('verify.report.path');
     const developStatus = JSON.parse(await readFile(path.join(result.runDir, 'nodes', 'develop', 'status.json'), 'utf8')) as {
       sessionId?: string;
     };
@@ -605,11 +610,11 @@ nodes:
     const resumedDevelopLaunch = launchedRequests.filter((request) => request.title.includes('develop'))[1];
     expect(resumedDevelopLaunch.command).toBe('codex');
     expect(resumedDevelopLaunch.args[0]).not.toBe('resume');
-    expect(resumedDevelopLaunch.args.at(-1)).toContain('Re-entry context:');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('## Re-entry Priority');
     expect(resumedDevelopLaunch.args.at(-1)).toContain('from:');
     expect(resumedDevelopLaunch.args.at(-1)).toContain('reason:');
-    expect(resumedDevelopLaunch.args.at(-1)).toContain('FlowBraid node protocol:');
-    expect(resumedDevelopLaunch.args.at(-1)).toContain('Command triggers:');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('## FlowBraid Protocol');
+    expect(resumedDevelopLaunch.args.at(-1)).toContain('## Required Commands');
   }, 15000);
 
   it('does not adopt another node session id from the shared workdir when the current node did not report one', async () => {

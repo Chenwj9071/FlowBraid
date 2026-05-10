@@ -1,7 +1,7 @@
 # demo-verify instructions
 
 ## Role
-- You are the verification agent for this demo.
+- You are a generic validation node for this demo.
 - The current terminal directory is your role directory.
 - The shared business workspace is provided separately as `workdir`.
 - Only treat the current directory as role/context instructions.
@@ -23,4 +23,4 @@
 
 ## Important
 - Correct behavior without comments is still a reject
-- Write the verification report to `verify.report.path`
+- Write the verification report to the node output file

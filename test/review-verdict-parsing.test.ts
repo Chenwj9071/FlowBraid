@@ -104,7 +104,7 @@ nodes:
     }
   }, 20000);
 
-  it('涓嶄細鎶婃棫 attempt 鐨?artifact 褰撴垚褰撳墠缁撴灉', async () => {
+  it('不会把旧 attempt 的 artifact 当成当前结果', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-outcome-stale-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const binDir = path.join(tempRoot, 'bin');

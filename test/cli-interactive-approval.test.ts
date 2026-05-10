@@ -13,7 +13,7 @@ function hasApprovalPrompt(stdout: string): boolean {
 }
 
 function hasRejectCommentPrompt(stdout: string): boolean {
-  return stdout.includes('打回意见') || stdout.includes('璇疯緭鍏ユ墦鍥炴剰瑙?') || stdout.includes('鐠囩柉绶崗銉﹀ⅵ閸ョ偞鍓扮憴?');
+  return stdout.includes('打回意见');
 }
 
 async function waitForExit(child: ReturnType<typeof spawn>, stdout: () => string, stderr: () => string, timeoutMs = 30000) {

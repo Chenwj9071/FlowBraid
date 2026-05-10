@@ -1,100 +1,26 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { buildCodexPrompt } from '../src/codex-prompt.js';
+import { createInitialState, createRunWorkspace } from '../src/workspace.js';
 import { loadWorkflowFile } from '../src/workflow.js';
-import { startWorkflow } from '../src/engine.js';
-import { readJson } from '../src/utils.js';
-
-async function createPromptAwareCodex(binDir: string): Promise<string> {
-  const fakeScript = [
-    "const fs = require('node:fs');",
-    "const path = require('node:path');",
-    '',
-    'function readStdin() {',
-    '  try {',
-    "    return fs.readFileSync(0, 'utf8');",
-    '  } catch {',
-    "    return '';",
-    '  }',
-    '}',
-    '',
-    'function parseArgs(argv) {',
-    "  const result = { outputPath: '', workdir: process.cwd() };",
-    '  for (let i = 0; i < argv.length; i += 1) {',
-    '    const arg = argv[i];',
-    "    if (arg === '--output-last-message') {",
-    '      result.outputPath = argv[i + 1] || "";',
-    '      i += 1;',
-    '      continue;',
-    '    }',
-    "    if (arg === '--cd') {",
-    '      result.workdir = argv[i + 1] || process.cwd();',
-    '      i += 1;',
-    '      continue;',
-    '    }',
-    '  }',
-    '  return result;',
-    '}',
-    '',
-    'const args = process.argv.slice(2);',
-    'const parsed = parseArgs(args);',
-    'const prompt = readStdin();',
-    "const latestVerifyMatch = prompt.match(/latest\\.verify\\.report:\\n([\\s\\S]*?)\\nlatest\\.human\\.feedback:/);",
-    "const latestHumanMatch = prompt.match(/latest\\.human\\.feedback:\\n([\\s\\S]*?)\\n\\nTask:/);",
-    "const latestVerify = latestVerifyMatch ? latestVerifyMatch[1].trim() : '';",
-    "const latestHuman = latestHumanMatch ? latestHumanMatch[1].trim() : '';",
-    "const isVerifyNode = /You are the verification node/i.test(prompt);",
-    "const calcPath = path.join(parsed.workdir, 'calc.js');",
-    "const runtimeStatePath = process.env.FLOWBRAID_NODE_DIR ? path.join(process.env.FLOWBRAID_NODE_DIR, 'state', 'runtime-state.json') : '';",
-    "if (!isVerifyNode) {",
-    "  const hasVerifyReport = latestVerify.includes('verdict: reject') || latestVerify.includes('missing comments');",
-    "  const hasHumanFeedback = latestHuman.length > 0 && latestHuman !== 'NONE';",
-    "  const script = hasVerifyReport",
-    "    ? ['// Sum two CLI numbers.', 'const a = Number(process.argv[2]);', 'const b = Number(process.argv[3]);', 'console.log(a + b);', ''].join('\\n')",
-    "    : ['const a = Number(process.argv[2]);', 'const b = Number(process.argv[3]);', 'console.log(a + b);', ''].join('\\n');",
-    "  fs.writeFileSync(calcPath, script, 'utf8');",
-    "  if (runtimeStatePath) {",
-    "    fs.mkdirSync(path.dirname(runtimeStatePath), { recursive: true });",
-    "    fs.writeFileSync(runtimeStatePath, JSON.stringify({ nodeId: 'develop', status: 'completed', outcome: 'success', summary: hasVerifyReport ? 'develop revised calc' : 'develop initial calc' }, null, 2), 'utf8');",
-    '  }',
-    "  fs.writeFileSync(parsed.outputPath, JSON.stringify({ hasVerifyReport, hasHumanFeedback, latestVerify, latestHuman }, null, 2), 'utf8');",
-    "  console.log('develop ok');",
-    "  process.exit(0);",
-    '}',
-    "const report = fs.readFileSync(calcPath, 'utf8').includes('//')",
-    "  ? ['verdict: approve', 'has comments'].join('\\n')",
-    "  : ['verdict: reject', 'missing comments'].join('\\n');",
-    "fs.writeFileSync(parsed.outputPath, report, 'utf8');",
-    "if (runtimeStatePath) {",
-    "  fs.mkdirSync(path.dirname(runtimeStatePath), { recursive: true });",
-    "  fs.writeFileSync(runtimeStatePath, JSON.stringify({ nodeId: 'verify', status: 'completed', outcome: fs.readFileSync(calcPath, 'utf8').includes('//') ? 'success' : 'reject', summary: report }, null, 2), 'utf8');",
-    '}',
-    "console.log(report);",
-    "process.exit(0);",
-  ].join('\n');
-
-  const scriptPath = path.join(binDir, 'fake-prompt-aware-codex.js');
-  const cmdPath = path.join(binDir, 'codex.cmd');
-  await writeFile(scriptPath, fakeScript, 'utf8');
-  await writeFile(cmdPath, `@echo off\r\nnode "${scriptPath}" %*\r\n`, 'utf8');
-  return cmdPath;
-}
+import type { CodexNodeDefinition } from '../src/types.js';
 
 describe('split prompt paths', () => {
-  it('绗簩杞?develop 鍗充娇涓嶈嚜琛岃璺緞鏂囦欢锛屼篃鑳芥牴鎹唴鑱?verify 鍙嶉琛ヤ笂娉ㄩ噴', async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-split-paths-'));
+  it('prioritizes re-entry context and generic runtime evidence over the original task text', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-split-prompt-paths-'));
     const workflowDir = path.join(tempRoot, 'workspace');
     const workspaceRoot = path.join(workflowDir, '.flowbraid-runs');
-    const binDir = path.join(tempRoot, 'bin');
     await mkdir(workflowDir, { recursive: true });
-    await mkdir(binDir, { recursive: true });
-    const codexCommand = await createPromptAwareCodex(binDir);
+    await mkdir(path.join(workflowDir, 'context'), { recursive: true });
+    await mkdir(path.join(workflowDir, 'shared-workdir'), { recursive: true });
 
     const workflowFile = path.join(workflowDir, 'workflow.yaml');
     const workflowText = `
 id: split-paths-demo
-workdir: .
+workdir: ./
+contextDir: ./context
 start: develop
 nodes:
   develop:
@@ -120,31 +46,65 @@ nodes:
     await writeFile(workflowFile, workflowText, 'utf8');
 
     const workflow = await loadWorkflowFile(workflowFile);
-    const result = await startWorkflow(workflow, {
-      workspaceRoot,
-      codexCommand,
-      maxSteps: 8,
-    });
+    const runWorkspace = await createRunWorkspace(workspaceRoot, workflow);
+    await createInitialState(runWorkspace, workflow);
 
-    expect(result.status).toBe('completed');
-
-    const calc = await readFile(path.join(workflowDir, 'calc.js'), 'utf8');
-    expect(calc).toContain('console.log(a + b);');
-
-    const developState = await readJson<{
-      hasVerifyReport: boolean;
-      hasHumanFeedback: boolean;
-      latestVerify: string;
-      latestHuman: string;
-    }>(
-      path.join(result.runDir, 'nodes', 'develop', 'artifacts', 'develop-last-message.json'),
+    await mkdir(path.join(runWorkspace.nodesDir, 'develop', 'state'), { recursive: true });
+    await writeFile(
+      path.join(runWorkspace.nodesDir, 'develop', 'state', 'runtime-state.json'),
+      JSON.stringify(
+        {
+          nodeId: 'develop',
+          attemptId: 'attempt-develop-0',
+          status: 'completed',
+          outcome: 'success',
+          summary: 'develop initial calc',
+        },
+        null,
+        2,
+      ),
+      'utf8',
     );
-    expect(developState.hasVerifyReport).toBe(true);
-    expect(developState.latestVerify).toContain('verdict: reject');
-    expect(developState.latestHuman).toBe('NONE');
+    await writeFile(
+      path.join(runWorkspace.messagesDir, 'human-feedback.jsonl'),
+      `${JSON.stringify({
+        decision: 'reject',
+        comment: 'comments missing',
+        at: '2026-05-05T00:00:00.000Z',
+        nodeId: 'verify',
+      })}\n`,
+      'utf8',
+    );
 
-    const secondRunScript = await readFile(path.join(workflowDir, 'calc.js'), 'utf8');
-    expect(secondRunScript).toContain('// Sum two CLI numbers.');
-  }, 20000);
+    const prompt = buildCodexPrompt(
+      workflow,
+      'develop',
+      'attempt-develop-1',
+      workflow.nodes.develop as CodexNodeDefinition,
+      path.join(runWorkspace.nodesDir, 'develop'),
+      path.join(runWorkspace.nodesDir, 'develop', 'artifacts'),
+      runWorkspace,
+      {
+        contextDir: path.join(workflowDir, 'context'),
+        workdir: path.join(workflowDir, 'shared-workdir'),
+      },
+      {
+        protocolMode: 'native-split',
+        reentryContext: {
+          fromNodeId: 'verify',
+          fromNodeType: 'codex',
+          reason: 'verification rejected because comments are missing',
+          requiredAction: 'add a clear comment to calc.js and report the result with the FlowBraid command',
+        },
+      },
+    );
+
+    expect(prompt).toContain('## Re-entry Priority');
+    expect(prompt).toContain('## Re-entry Evidence');
+    expect(prompt).toContain('comments missing');
+    expect(prompt).toContain('runtime-state.path:');
+    expect(prompt).toContain('human.feedback.path:');
+    expect(prompt).not.toContain('verify.report.path');
+    expect(prompt).toContain('## FlowBraid Protocol Addendum');
+  });
 });
-
