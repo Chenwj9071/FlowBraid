@@ -26,12 +26,109 @@ function printUsage(): void {
   console.log(`FlowBraid CLI
 
 Usage:
-  flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive] [--pty]
+  flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive] [--pty] [--no-interactive]
   flowbraid resume <run-dir> [--decision approve|reject] [--message <text>] [--codex-command <cmd>]
   flowbraid send <run-dir> <message> [--codex-command <cmd>]
   flowbraid status <run-dir> [--json]
   flowbraid node <start|complete|fail|pause|artifact|heartbeat> --run-dir <dir> --node-id <id> [...]
-  flowbraid validate <workflow-file>`);
+  flowbraid validate <workflow-file>
+  flowbraid workflow-help
+  flowbraid --help
+
+Run Modes:
+  TTY 下默认自动进入交互模式，并优先使用 native split。
+  --pty                强制使用单终端 PTY 交互模式
+  --interactive        显式开启交互模式
+  --no-interactive     强制关闭交互模式，适合脚本和 CI
+
+Common Commands:
+  flowbraid run demo.workflow.yaml
+  flowbraid run demo.workflow.yaml --pty
+  flowbraid run demo.workflow.yaml --no-interactive
+  flowbraid resume .flowbraid-runs/<run-id>
+  flowbraid send .flowbraid-runs/<run-id> "more context"
+
+More Help:
+  用 flowbraid workflow-help 查看简化版工作流编写说明`);
+}
+
+function printWorkflowHelp(): void {
+  console.log(`FlowBraid Workflow Quick Reference
+
+最小示例:
+  id: hello-demo
+  start: hello
+  nodes:
+    hello:
+      type: shell
+      command: echo hello
+      next: done
+    done:
+      type: end
+      message: finished
+
+顶层字段:
+  id            工作流唯一标识
+  start         起始节点 id
+  workdir       默认业务目录，供节点实际修改和验证文件
+  contextDir    默认上下文目录，供节点读取 AGENTS.md 和角色约束
+  nodes         节点字典，key 就是节点 id
+
+通用节点字段:
+  type          节点类型，当前支持 shell / codex / agent_session / gate / approval / end
+  title         可选描述，不参与调度
+  next          默认后继节点
+  transitions   显式分支，常见键有 success / failure / default / approve / reject
+  workdir       节点级业务目录，优先级高于 workflow 级 workdir
+  contextDir    节点级上下文目录，优先级高于 workflow 级 contextDir
+
+目录模型:
+  contextDir 负责“身份和约束”
+  workdir    负责“真实业务修改”
+  run workspace 保存状态、日志、消息和节点产物
+
+节点类型:
+  shell
+    必填: command
+    适合一次性准备脚本、命令执行、环境检查
+
+  codex
+    必填: prompt
+    可选: outputFile / model / reentry.mode
+    推荐通过 flowbraid node complete --outcome ... 或 flowbraid node fail 显式上报结果
+    reentry.mode 支持 resume / new_with_history / new
+
+  agent_session
+    必填: provider / prompt
+    当前 provider 只支持 codex
+    等待输入时通过 flowbraid send <run-dir> <message> 继续
+
+  gate
+    进入后暂停，适合人工检查或等待外部条件
+    通过 flowbraid resume <run-dir> 继续
+
+  approval
+    人工审批节点
+    必须声明 transitions.approve 和 transitions.reject
+    reject 时应提供 --message 记录反馈
+
+  end
+    结束工作流，可选 message
+
+分支规则:
+  普通节点优先走 transitions.success / transitions.failure
+  其次走 transitions.default
+  再其次走 next
+  approval 节点使用 transitions.approve / transitions.reject
+
+运行与续跑:
+  flowbraid run <workflow-file>
+  flowbraid resume <run-dir>
+  flowbraid resume <run-dir> --decision approve
+  flowbraid resume <run-dir> --decision reject --message "请补测试"
+  flowbraid send <run-dir> <message>
+
+完整说明请查看 doc/workflow-authoring.md`);
 }
 
 export function resolveNativeSplitPreference(
@@ -646,7 +743,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 1;
   }
 
+  if (command === '--help' || command === 'help') {
+    printUsage();
+    return 0;
+  }
+
   try {
+    if (command === 'workflow-help') {
+      printWorkflowHelp();
+      return 0;
+    }
+
     if (command === 'validate') {
       const filePath = rest[0];
       if (!filePath) {
