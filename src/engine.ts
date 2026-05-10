@@ -165,6 +165,14 @@ export class FlowBraidEngine {
     return resumedEngine.runLoop(workspace, state);
   }
 
+  async continueRun(
+    workspace: RunWorkspace,
+    state: RunState,
+    approvalDecision?: 'approve' | 'reject',
+  ): Promise<ExecutionResult> {
+    return this.runLoop(workspace, state, approvalDecision);
+  }
+
   private async runLoop(
     workspace: RunWorkspace,
     state: RunState,

@@ -104,6 +104,11 @@ export interface RunState {
   currentAttemptId?: string | null;
   pendingNodeId: string | null;
   resumeCount: number;
+  recoveryCount?: number;
+  recoveryState?: 'idle' | 'awaiting_decision';
+  recoveryTargetNodeId?: string | null;
+  recoveryTargetAttemptId?: string | null;
+  recoverySuggestedAction?: 'resume' | 'retry-current' | 'continue-next' | 'fail-run' | null;
   stepCount: number;
   startedAt: string;
   updatedAt: string;

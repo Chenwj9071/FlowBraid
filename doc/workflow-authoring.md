@@ -3,6 +3,7 @@
 本文说明 `workflow.yaml` / `workflow.yml` / `workflow.json` 的写法、字段含义、运行语义和推荐用法。
 
 可以先运行 `flowbraid workflow-help` 获取简化版的工作流编写说明；如需完整字段、语义和示例，再继续阅读本文。
+`flowbraid recover` 用于主调度器异常退出、终端误关或 run 进入不一致状态后的恢复；它和 `resume` 不同，`resume` 只用于继续正常的 paused run。
 
 目标读者：
 - 需要自己编排 FlowBraid 工作流的人
@@ -321,6 +322,7 @@ flowbraid run path/to/workflow.yaml
 flowbraid run path/to/workflow.yaml --interactive
 flowbraid run path/to/workflow.yaml --no-interactive
 flowbraid resume <run-dir>
+flowbraid recover <run-dir>
 flowbraid resume <run-dir> --decision approve
 flowbraid resume <run-dir> --decision reject --message "补充说明"
 flowbraid send <run-dir> "继续执行"

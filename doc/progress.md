@@ -12,6 +12,7 @@
 - 已完成 workflow 解析、状态落盘、`shell` 执行器、`codex` 任务执行器和 CLI 调度
 - 已支持 `shell`、`codex`、`agent_session`、`gate`、`approval`、`end` 节点
 - 已支持 `run`、`resume`、`send` 的基本运行闭环
+- 已新增 `recover` 工作流恢复入口，用于主调度器中断后的 run 恢复与人工恢复确认
 - `codex` 主路径已迁移到通用 `runtime-state + outcome` 状态协议，主示例和 native split 已优先按新协议流转
 - `codex review` 仅作为历史兼容说明保留，不再作为主路径表达
 - `agent_session` 已改为长期会话模型，节点完成由结构化 turn 结果决定
@@ -74,10 +75,13 @@
 - workflow 文件所在目录是默认工作目录
 - run workspace 默认落在该目录下的 `.flowbraid-runs/`
 - `gate` / `approval` 使用 `resume` 继续
+- 主调度器异常中断后使用 `recover` 重新接管 run
 - `agent_session` 使用 `send` 继续，不走 `resume`
 - 如果节点未单独声明 `contextDir`，默认回退到当前节点的 `workdir`
 - native split 回流节点时，只消费当前 `attemptId` 的 session 状态和事件
 - `codex` 节点回流策略默认是 `reentry.mode: resume`
+- `recover` 对 native split `codex` 会优先尝试基于已落盘 `sessionId` 恢复节点会话；其他不确定场景进入人工恢复确认
+- `recover` 是面向异常中断 run 的恢复入口，不是正常 paused 流程的替代命令
 
 ## 最近一次重点改动
 - 新增 `nodes/<node-id>/state/runtime-state.json`
@@ -108,12 +112,14 @@
   - `nodes/<node-id>/state/native-session.json.sessionId`
   - `nodes/<node-id>/status.json.sessionId`
 - native split 关闭逻辑已从“仅 PID”改为“标题匹配主关窗 + PID 兜底”，关闭命令会使用 `FlowBraid native <node> [<attemptId>]` 作为窗口标题标识
+- 新增 `flowbraid recover <run-dir>`，支持 `retry-current / continue-next / fail-run` 三种人工恢复动作
 
 ## 后续建议
 1. 继续删除 `mode: exec|review` 的主路径依赖，最终仅保留必要的历史兼容说明或彻底移除
 2. 把 `workflow-authoring.md`、`requirements.md`、`architecture.md` 进一步收紧为以 outcome 为主的状态机表述
 3. 为 `timeline.json` 增加更明确的 CLI 展示或调试输出
 4. 继续观察真实 Windows 终端下的 native split 行为，必要时补充更细粒度的 terminal / session 诊断日志
+5. 继续补强 `recover` 在真实 native split 会话恢复场景下的端到端验证与交互体验
 
 ## 维护规则
 - 每次做完一轮明确功能，更新这里

@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { loadWorkflowFile, WorkflowError } from './workflow.js';
 import { loadManifest, loadRunState, loadRunTimeline, persistRunState } from './workspace.js';
 import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
+import { recoverWorkflow } from './recovery.js';
 import { RunInterruptedError } from './errors.js';
 import { appendText, nowIso, readJson } from './utils.js';
 import { stabilizeTerminalForPrompt } from './terminal.js';
@@ -28,6 +29,7 @@ function printUsage(): void {
 Usage:
   flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive] [--pty] [--no-interactive]
   flowbraid resume <run-dir> [--decision approve|reject] [--message <text>] [--codex-command <cmd>]
+  flowbraid recover <run-dir> [--decision retry-current|continue-next|fail-run] [--message <text>] [--codex-command <cmd>]
   flowbraid send <run-dir> <message> [--codex-command <cmd>]
   flowbraid status <run-dir> [--json]
   flowbraid node <start|complete|fail|pause|artifact|heartbeat> --run-dir <dir> --node-id <id> [...]
@@ -46,7 +48,13 @@ Common Commands:
   flowbraid run demo.workflow.yaml --pty
   flowbraid run demo.workflow.yaml --no-interactive
   flowbraid resume .flowbraid-runs/<run-id>
+  flowbraid recover .flowbraid-runs/<run-id> --decision retry-current
   flowbraid send .flowbraid-runs/<run-id> "more context"
+
+Recover:
+  flowbraid recover 用于主调度器异常退出、终端误关或 run 进入不一致状态后的恢复
+  如果当前节点可明确继续，会自动恢复；否则进入人工恢复确认
+  可手动指定 --decision retry-current|continue-next|fail-run
 
 More Help:
   用 flowbraid workflow-help 查看简化版工作流编写说明`);
@@ -124,6 +132,7 @@ function printWorkflowHelp(): void {
 运行与续跑:
   flowbraid run <workflow-file>
   flowbraid resume <run-dir>
+  flowbraid recover <run-dir>
   flowbraid resume <run-dir> --decision approve
   flowbraid resume <run-dir> --decision reject --message "请补测试"
   flowbraid send <run-dir> <message>
@@ -609,6 +618,43 @@ async function handleNodeCommand(subcommand: string | undefined, flags: Record<s
   }
 }
 
+async function promptRecoveryDecision(
+  abortSignal?: AbortSignal,
+): Promise<{ decision: 'retry-current' | 'continue-next' | 'fail-run'; comment?: string }> {
+  prepareConsoleForPromptOutput();
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    while (true) {
+      const answer = await Promise.race([
+        rl.question('恢复动作 [retry-current/continue-next/fail-run]: '),
+        createAbortPromise(abortSignal, () => rl.close()),
+      ]);
+      const normalized = answer.trim().toLowerCase();
+      if (normalized === 'retry-current') {
+        finishPromptLine();
+        return { decision: normalized };
+      }
+      if (normalized === 'continue-next' || normalized === 'fail-run') {
+        while (true) {
+          const comment = await Promise.race([
+            rl.question('请输入恢复说明: '),
+            createAbortPromise(abortSignal, () => rl.close()),
+          ]);
+          const trimmed = comment.trim();
+          if (trimmed) {
+            finishPromptLine();
+            return { decision: normalized, comment: trimmed };
+          }
+          process.stdout.write('message is required\r\n');
+        }
+      }
+      process.stdout.write('please enter retry-current, continue-next, or fail-run\r\n');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 function requireNodeCommandFlag(flags: Record<string, string | boolean>, name: string, subcommand?: string): string {
   const value = flags[name];
   if (value === undefined || value === null || value === '') {
@@ -889,6 +935,54 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           await failRun(resolvedRunDir, 'user interrupted run');
         }
         throw error;
+      } finally {
+        interruptContext.dispose();
+      }
+    }
+
+    if (command === 'recover') {
+      const runDir = rest[0];
+      if (!runDir) {
+        throw new Error('recover requires a run directory path');
+      }
+
+      const resolvedRunDir = path.resolve(runDir);
+      const interruptContext = createInterruptContext();
+      interruptContext.lastRunDir = resolvedRunDir;
+      let decision =
+        flags.decision === 'retry-current' || flags.decision === 'continue-next' || flags.decision === 'fail-run'
+          ? (flags.decision as 'retry-current' | 'continue-next' | 'fail-run')
+          : undefined;
+      let comment = flags.message ? String(flags.message) : undefined;
+
+      try {
+        if ((decision === 'continue-next' || decision === 'fail-run') && !comment) {
+          throw new Error(`${decision} requires --message`);
+        }
+
+        if (!decision && process.stdin.isTTY && process.stdout.isTTY) {
+          const prompted = await promptRecoveryDecision(interruptContext.controller.signal);
+          decision = prompted.decision;
+          comment = prompted.comment;
+        }
+
+        const result = await recoverWorkflow(resolvedRunDir, {
+          ...buildRunnerOptionsFromFlags(flags, {
+            codexCommand: resolveCodexCommand(flags),
+            nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
+            abortSignal: interruptContext.controller.signal,
+            logger: writeStdoutLine,
+          }),
+          decision,
+          comment,
+        });
+        writeStdoutLine(`run ${result.runId} => ${result.status}`);
+        writeStdoutLine(`workspace: ${result.runDir}`);
+        if (result.status === 'paused') {
+          writeStdoutLine(`current paused node: ${result.currentNodeId}`);
+        }
+        stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
+        return result.status === 'failed' ? 1 : 0;
       } finally {
         interruptContext.dispose();
       }
