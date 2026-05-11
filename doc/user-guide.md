@@ -306,6 +306,28 @@ reentry:
 - `new`
   - 开新会话，只保留当前必要引导
 
+#### native split 终端失联处理
+
+对于 native split 模式下的 `codex` 节点，当前默认行为是：
+
+- 不使用固定时长硬超时判定失败
+- 只要外部终端仍存活，调度器就继续等待节点显式上报终态
+- 如果外部终端确认失联，run 会暂停在当前 `codex` 节点，等待人工决定下一步
+
+此时应使用：
+
+```bash
+flowbraid resume <run-dir> --decision retry-current
+flowbraid resume <run-dir> --decision continue-next
+```
+
+适用场景：
+
+- `retry-current`
+  - 终端意外关闭，但你希望重新拉起当前节点再做一次
+- `continue-next`
+  - 你确认当前节点结果可以接受，或者希望人工跳过该节点继续往后跑
+
 ### 8.3 `agent_session`
 
 ```yaml
@@ -480,13 +502,44 @@ flowbraid resume <run-dir> --decision approve
 flowbraid resume <run-dir> --decision reject --message "补充说明"
 ```
 
-### 10.4 给 `agent_session` 发送输入
+codex 终端失联后重试当前节点：
+
+```bash
+flowbraid resume <run-dir> --decision retry-current
+```
+
+codex 终端失联后继续后续节点：
+
+```bash
+flowbraid resume <run-dir> --decision continue-next
+```
+
+### 10.4 `recover` 的使用方式
+
+`recover` 用于主调度器异常退出、终端误关或 run 进入不一致状态后的重新接管。
+
+推荐直接执行：
+
+```bash
+flowbraid recover <run-dir>
+```
+
+当前实现会先读取 run 落盘状态，再决定如何接管：
+
+- 如果当前是正常 `paused` 的 `approval` 节点，会恢复到审批等待状态，并继续进入 `approve/reject` 交互
+- 如果当前是正常 `paused` 的 `gate` 节点，会恢复到 gate 等待继续状态
+- 如果当前是 codex 终端失联后的人工决策暂停，会恢复到该节点的人工处理交互
+- 只有在状态不足以自动判断时，才需要额外指定恢复决策
+
+因此，通常不需要在执行 `recover` 前先知道工作流停在哪个节点。
+
+### 10.5 续 `agent_session` 发送输入
 
 ```bash
 flowbraid send <run-dir> "继续执行"
 ```
 
-### 10.5 查看运行状态
+### 10.6 查看运行状态
 
 ```bash
 flowbraid status <run-dir>
@@ -519,7 +572,9 @@ workspace: D:\Code\FlowBraid\examples\.flowbraid-runs\20260506-123456-abcdef
 
 - `gate` 节点用 `resume`
 - `approval` 节点用 `resume --decision ...`
+- codex 终端失联后的人工决策暂停用 `resume --decision retry-current|continue-next`
 - `agent_session` 节点用 `send`
+- 主调度器异常退出或 run 状态异常时用 `recover`
 
 ## 12. 运行产物在哪里
 
@@ -545,6 +600,7 @@ workspace: D:\Code\FlowBraid\examples\.flowbraid-runs\20260506-123456-abcdef
 - `start` 指向不存在的节点
 - `approval` 没有配置 `approve` 或 `reject`
 - `agent_session` 错用 `resume`
+- 把正常 paused 的 `approval` / `gate` / codex 人工决策场景错误交给 `recover --decision ...`
 - `codex` prompt 没有明确要求上报 `flowbraid node complete --outcome ...`
 - 新 workflow 仍把 `mode: review + verdict:` 当成主完成协议
 - 把 `contextDir` 当成真实业务修改目录
