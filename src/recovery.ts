@@ -137,13 +137,31 @@ export async function recoverWorkflow(
       nodeId: diagnosis.nodeId,
       attemptId: diagnosis.attemptId ?? null,
     });
-    return {
-      status: state.status,
-      runId: state.runId,
-      runDir: workspace.runDir,
-      currentNodeId: state.currentNodeId,
-      pendingNodeId: state.pendingNodeId,
-    };
+    const currentNode = diagnosis.nodeId ? runtimeWorkflow.nodes[diagnosis.nodeId] : null;
+    const awaitingManualCodexDecision =
+      currentNode?.type === 'codex' &&
+      state.manualDecisionState === 'awaiting_codex_intervention' &&
+      state.manualDecisionNodeId === state.currentNodeId &&
+      state.manualDecisionAttemptId === state.currentAttemptId;
+    const canResumeDirectly =
+      currentNode?.type === 'approval'
+        ? Boolean(options.approvalDecision)
+        : awaitingManualCodexDecision
+          ? Boolean(options.manualDecision)
+          : currentNode?.type !== 'agent_session';
+
+    if (!canResumeDirectly) {
+      return {
+        status: state.status,
+        runId: state.runId,
+        runDir: workspace.runDir,
+        currentNodeId: state.currentNodeId,
+        pendingNodeId: state.pendingNodeId,
+      };
+    }
+
+    const engine = new FlowBraidEngine(runtimeWorkflow, options, runtimeWorkflow.directory);
+    return engine.resume(workspace.runDir);
   }
 
   if (diagnosis.kind === 'finalize_then_continue') {

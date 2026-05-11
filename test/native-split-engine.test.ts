@@ -3,7 +3,7 @@ import os from 'node:os';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { loadWorkflowFile } from '../src/workflow.js';
-import { startWorkflow } from '../src/engine.js';
+import { resumeWorkflow, startWorkflow } from '../src/engine.js';
 import { getNativeSessionPath, writeNativeSessionState } from '../src/native-session.js';
 import { appendText } from '../src/utils.js';
 import { getNodeRuntimeStatePath, writeNodeRuntimeState } from '../src/node-runtime.js';
@@ -342,6 +342,175 @@ nodes:
     expect(elapsed).toBeLessThan(3000);
     const events = await readFile(path.join(result.runDir, 'messages', 'events.jsonl'), 'utf8');
     expect(events).toContain('"type":"terminal.closed"');
+  });
+
+  it('pauses for manual codex intervention when the native terminal disappears and can continue to next node', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-split-manual-continue-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    const workspaceRoot = path.join(workflowDir, '.flowbraid-runs');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(
+      workflowFile,
+      `
+id: native-split-manual-continue-demo
+workdir: .
+contextDir: .
+start: develop
+nodes:
+  develop:
+    type: codex
+    prompt: implement calc
+    next: done
+  done:
+    type: end
+    message: done
+`,
+      'utf8',
+    );
+    const workflow = await loadWorkflowFile(workflowFile);
+
+    const launcher = {
+      async launch(): Promise<{ terminalPid: number }> {
+        return { terminalPid: 9801 };
+      },
+      async close(): Promise<void> {
+        return;
+      },
+    };
+
+    const firstResult = await startWorkflow(workflow, {
+      workspaceRoot,
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+      isTerminalProcessAlive: async () => false,
+    });
+
+    expect(firstResult.status).toBe('paused');
+    const pausedRunState = JSON.parse(await readFile(path.join(firstResult.runDir, 'state', 'run.json'), 'utf8')) as {
+      status: string;
+      currentNodeId: string | null;
+      pendingNodeId: string | null;
+      manualDecisionState?: string;
+      manualDecisionReason?: string | null;
+    };
+    expect(pausedRunState.status).toBe('paused');
+    expect(pausedRunState.currentNodeId).toBe('develop');
+    expect(pausedRunState.pendingNodeId).toBe('done');
+    expect(pausedRunState.manualDecisionState).toBe('awaiting_codex_intervention');
+    expect(pausedRunState.manualDecisionReason).toContain('native terminal lost unexpectedly');
+
+    const resumed = await resumeWorkflow(firstResult.runDir, {
+      manualDecision: 'continue-next',
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+    });
+    expect(resumed.status).toBe('completed');
+  });
+
+  it('retries the current codex node after terminal loss when manual decision is retry-current', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'flowbraid-native-split-manual-retry-'));
+    const workflowDir = path.join(tempRoot, 'workspace');
+    const workspaceRoot = path.join(workflowDir, '.flowbraid-runs');
+    await mkdir(workflowDir, { recursive: true });
+
+    const workflowFile = path.join(workflowDir, 'workflow.yaml');
+    await writeFile(
+      workflowFile,
+      `
+id: native-split-manual-retry-demo
+workdir: .
+contextDir: .
+start: develop
+nodes:
+  develop:
+    type: codex
+    prompt: implement calc
+    next: done
+  done:
+    type: end
+    message: done
+`,
+      'utf8',
+    );
+    const workflow = await loadWorkflowFile(workflowFile);
+
+    let launchCount = 0;
+    const launcher = {
+      async launch(): Promise<{ terminalPid: number }> {
+        launchCount += 1;
+        const terminalPid = 9900 + launchCount;
+        if (launchCount === 2) {
+          setTimeout(async () => {
+            const runDirs = await readDirNames(workspaceRoot);
+            const runDir = path.join(workspaceRoot, runDirs[0]);
+            const nodeDir = path.join(runDir, 'nodes', 'develop');
+            const attemptId = await readCurrentAttemptId(runDir);
+            await writeNodeRuntimeState(getNodeRuntimeStatePath(nodeDir), {
+              nodeId: 'develop',
+              attemptId,
+              status: 'completed',
+              outcome: 'success',
+              terminalPid,
+              startedAt: '2026-05-11T00:00:00.000Z',
+              updatedAt: '2026-05-11T00:00:05.000Z',
+              completedAt: '2026-05-11T00:00:05.000Z',
+              summary: 'retry complete',
+            });
+            await writeNativeSessionState(getNativeSessionPath(nodeDir), {
+              mode: 'native_split_terminal',
+              attemptId,
+              status: 'completed',
+              terminalPid,
+              startedAt: '2026-05-11T00:00:00.000Z',
+              updatedAt: '2026-05-11T00:00:05.000Z',
+              completedAt: '2026-05-11T00:00:05.000Z',
+              result: { kind: 'complete', summary: 'retry complete' },
+            });
+          }, 30);
+        }
+        return { terminalPid };
+      },
+      async close(): Promise<void> {
+        return;
+      },
+    };
+
+    let terminalAliveChecks = 0;
+    const firstResult = await startWorkflow(workflow, {
+      workspaceRoot,
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+      isTerminalProcessAlive: async () => {
+        terminalAliveChecks += 1;
+        return launchCount > 1 || terminalAliveChecks < 2;
+      },
+    });
+
+    expect(firstResult.status).toBe('paused');
+
+    const resumed = await resumeWorkflow(firstResult.runDir, {
+      manualDecision: 'retry-current',
+      nativeSplitTerminals: true,
+      interactiveTerminal: { input: process.stdin, output: process.stdout },
+      externalTerminalLauncher: launcher,
+      isTerminalProcessAlive: async () => true,
+    });
+
+    expect(resumed.status).toBe('completed');
+    expect(launchCount).toBe(2);
+    const timeline = JSON.parse(await readFile(path.join(resumed.runDir, 'state', 'timeline.json'), 'utf8')) as Array<{
+      nodeId: string;
+      attemptId: string;
+      status: string;
+    }>;
+    const developAttempts = timeline.filter((entry) => entry.nodeId === 'develop');
+    expect(developAttempts).toHaveLength(2);
+    expect(developAttempts[0].attemptId).not.toBe(developAttempts[1].attemptId);
   });
 
   it('resumes a native codex node with its own recorded session id on re-entry', async () => {

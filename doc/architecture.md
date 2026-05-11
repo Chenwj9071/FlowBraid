@@ -32,6 +32,7 @@ FlowBraid 当前拆成四层：
 - 节点成功、失败、暂停都要写入状态文件。
 - `gate` / `approval` 是运行时一等状态，不是脚本外置逻辑。
 - `agent_session` 节点暂停时不切到 `pendingNodeId`，而是保持 `currentNodeId` 指向当前会话节点，等待 `send`。
+- native split 下的 `codex` 节点不再使用固定时长硬超时判定失败；调度器持续等待节点显式终态，只在终端确认失联时把 run 暂停到人工决策状态。
 - 节点失败时如果配置了 `transitions.failure`，调度器会保留该节点的失败状态，并继续流转到失败分支节点。
 - 主调度器异常中断后，`recover` 负责重新诊断当前 run，并决定恢复当前节点、继续下一节点或人工确认。
 
@@ -84,8 +85,9 @@ FlowBraid 当前拆成四层：
 10. 如果 turn 结果是 `waiting_input`，run 进入 `paused`，当前节点保持不变，等待 `flowbraid send` 或交互模式下继续输入。
 11. 如果 turn 结果是 `completed`，调度器按 `next` / `transitions.success` 流转到下一个节点。
 12. `approval` 节点在 `resume` 时消费 `approve` / `reject` 决策。
-13. 如果主调度器异常中断，可通过 `flowbraid recover <run-dir>` 重新接管。
-14. 遇到 `end` 节点后结束运行。
+13. native split `codex` 节点如果终端失联，`resume` 会消费 `retry-current` / `continue-next` 人工决策。
+14. 如果主调度器异常中断，可通过 `flowbraid recover <run-dir>` 重新接管。
+15. 遇到 `end` 节点后结束运行。
 
 ## 当前设计取舍
 
@@ -100,3 +102,4 @@ FlowBraid 当前拆成四层：
 - native split 下的 `codex` 节点回流策略由节点级 `reentry.mode` 控制，默认值为 `resume`。
 - 调度器在启动 native codex 终端后，会基于 `workdir + startedAt` 主动探测新产生的 `codex` `sessionId`，并写入 `nodes/<node-id>/state/native-session.json` 与 `nodes/<node-id>/status.json`。
 - 回流到同一 `codex` 节点时，只允许使用该节点自己最近一次持久化的 `sessionId` 恢复，禁止根据共享 `workdir` 推断其他节点会话。
+- native split `codex` 节点如果仅仅长时间等待用户输入，会继续保持等待；如果外部终端消失，则把当前节点标记为人工决策暂停，等待 `resume` 指定 `retry-current` 或 `continue-next`。

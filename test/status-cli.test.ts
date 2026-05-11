@@ -24,6 +24,8 @@ describe('status CLI', () => {
     expect(stdout).toContain('workflowId: status-cli-demo');
     expect(stdout).toContain('currentNodeId: develop');
     expect(stdout).toContain('currentAttemptId: attempt-develop-1');
+    expect(stdout).toContain('manualDecisionState: awaiting_codex_intervention');
+    expect(stdout).toContain('manualDecisionReason: native terminal lost unexpectedly; manual decision required');
     expect(stdout).toContain('reentry.mode: resume');
     expect(stdout).toContain('node.sessionId: session-develop-1');
     expect(stdout).toContain('native.status: completed');
@@ -93,6 +95,10 @@ nodes:
   runState.currentAttemptId = 'attempt-develop-1';
   runState.pendingNodeId = 'done';
   runState.status = 'paused';
+  runState.manualDecisionState = 'awaiting_codex_intervention';
+  runState.manualDecisionNodeId = 'develop';
+  runState.manualDecisionAttemptId = 'attempt-develop-1';
+  runState.manualDecisionReason = 'native terminal lost unexpectedly; manual decision required';
   await persistRunState(workspace, runState);
 
   const nodeDir = path.join(workspace.nodesDir, 'develop');

@@ -92,7 +92,12 @@ export class FlowBraidEngine {
     }
 
     const currentNode = state.currentNodeId ? this.workflow.nodes[state.currentNodeId] : null;
-    if (!state.pendingNodeId && currentNode?.type !== 'approval') {
+    const awaitingManualCodexDecision =
+      state.manualDecisionState === 'awaiting_codex_intervention' &&
+      currentNode?.type === 'codex' &&
+      state.manualDecisionNodeId === state.currentNodeId &&
+      state.manualDecisionAttemptId === state.currentAttemptId;
+    if (!state.pendingNodeId && currentNode?.type !== 'approval' && !awaitingManualCodexDecision) {
       throw new Error('运行状态为 paused，但 pendingNodeId 为空，无法 resume');
     }
     if (currentNode?.type === 'approval' && !this.options.approvalDecision) {
@@ -103,6 +108,49 @@ export class FlowBraidEngine {
     }
     if (currentNode?.type === 'agent_session') {
       throw new Error('agent_session 节点请使用 send 继续对话，而不是 resume');
+    }
+
+    if (awaitingManualCodexDecision) {
+      if (!this.options.manualDecision) {
+        throw new Error('codex 节点终端失联后，resume 需要通过 --decision retry-current|continue-next 指定处理动作');
+      }
+      if (this.options.manualDecision === 'retry-current') {
+        await this.supersedePausedAttempt(workspace, state.currentNodeId!, state.currentAttemptId!);
+        state.status = 'running';
+        state.pendingNodeId = null;
+        state.manualDecisionState = 'idle';
+        state.manualDecisionNodeId = null;
+        state.manualDecisionAttemptId = null;
+        state.manualDecisionReason = null;
+        state.resumeCount += 1;
+        await persistRunState(workspace, state);
+        this.options.logger?.(`[run] manual decision retry-current at ${state.currentNodeId}`);
+        const resumedWorkflow = manifest.workflow as RuntimeWorkflow;
+        const resumedEngine = new FlowBraidEngine(resumedWorkflow, this.options, resumedWorkflow.directory);
+        return resumedEngine.runLoop(workspace, state);
+      }
+
+      if (this.options.manualDecision === 'continue-next') {
+        if (!state.pendingNodeId) {
+          throw new Error('当前 codex 节点没有可继续的后继节点，不能 continue-next');
+        }
+        state.status = 'running';
+        state.currentNodeId = state.pendingNodeId;
+        state.currentAttemptId = null;
+        state.pendingNodeId = null;
+        state.manualDecisionState = 'idle';
+        state.manualDecisionNodeId = null;
+        state.manualDecisionAttemptId = null;
+        state.manualDecisionReason = null;
+        state.resumeCount += 1;
+        await persistRunState(workspace, state);
+        this.options.logger?.(`[run] manual decision continue-next -> ${state.currentNodeId}`);
+        const resumedWorkflow = manifest.workflow as RuntimeWorkflow;
+        const resumedEngine = new FlowBraidEngine(resumedWorkflow, this.options, resumedWorkflow.directory);
+        return resumedEngine.runLoop(workspace, state);
+      }
+
+      throw new Error(`unsupported manual decision: ${this.options.manualDecision}`);
     }
 
     if (currentNode?.type === 'codex' && state.currentNodeId && state.currentAttemptId) {
@@ -117,6 +165,10 @@ export class FlowBraidEngine {
       state.pendingNodeId = null;
     }
     state.resumeCount += 1;
+    state.manualDecisionState = 'idle';
+    state.manualDecisionNodeId = null;
+    state.manualDecisionAttemptId = null;
+    state.manualDecisionReason = null;
     await persistRunState(workspace, state);
     this.options.logger?.(`[run] resume #${state.resumeCount} from ${runDir}`);
     this.options.logger?.(
@@ -380,6 +432,20 @@ export class FlowBraidEngine {
         state.status = 'paused';
         state.currentNodeId = currentNodeId;
         state.pendingNodeId = nextNodeId;
+        if (
+          node.type === 'codex' &&
+          detail?.includes('manual decision required')
+        ) {
+          state.manualDecisionState = 'awaiting_codex_intervention';
+          state.manualDecisionNodeId = currentNodeId;
+          state.manualDecisionAttemptId = attemptId;
+          state.manualDecisionReason = detail;
+        } else {
+          state.manualDecisionState = 'idle';
+          state.manualDecisionNodeId = null;
+          state.manualDecisionAttemptId = null;
+          state.manualDecisionReason = null;
+        }
         await persistRunState(workspace, state);
         this.options.logger?.(
           `[run] paused at ${currentNodeId}${nextNodeId ? `, next ${nextNodeId}` : ''}${detail ? `: ${detail}` : ''}`,
@@ -403,6 +469,10 @@ export class FlowBraidEngine {
         state.currentAttemptId = attemptId;
         state.pendingNodeId = nextNodeId;
         state.failedReason = detail;
+        state.manualDecisionState = 'idle';
+        state.manualDecisionNodeId = null;
+        state.manualDecisionAttemptId = null;
+        state.manualDecisionReason = null;
         await persistRunState(workspace, state);
         return this.finalize(workspace, state);
       }
@@ -416,6 +486,10 @@ export class FlowBraidEngine {
       state.currentNodeId = currentNodeId;
       state.currentAttemptId = null;
       state.pendingNodeId = null;
+      state.manualDecisionState = 'idle';
+      state.manualDecisionNodeId = null;
+      state.manualDecisionAttemptId = null;
+      state.manualDecisionReason = null;
       await persistRunState(workspace, state);
     }
 
@@ -423,6 +497,10 @@ export class FlowBraidEngine {
     state.currentNodeId = null;
     state.currentAttemptId = null;
     state.pendingNodeId = null;
+    state.manualDecisionState = 'idle';
+    state.manualDecisionNodeId = null;
+    state.manualDecisionAttemptId = null;
+    state.manualDecisionReason = null;
     await persistRunState(workspace, state);
     this.options.logger?.('[run] completed');
     return this.finalize(workspace, state);
@@ -945,8 +1023,8 @@ export class FlowBraidEngine {
     terminalPid: number,
     startedAt: string,
   ): Promise<NativeSessionState> {
-    const timeoutAt = Date.now() + 15 * 60_000;
-    while (Date.now() < timeoutAt) {
+    let firstObservedTerminalLossAt: number | null = null;
+    while (true) {
       try {
         const state = await readNativeSessionState(sessionPath);
         if (state.attemptId === attemptId && (state.status === 'completed' || state.status === 'failed' || state.status === 'paused')) {
@@ -972,22 +1050,44 @@ export class FlowBraidEngine {
       } catch {
         // keep polling
       }
+      const terminalAlive = await this.isTerminalAlive(terminalPid);
+      if (!terminalAlive) {
+        if (firstObservedTerminalLossAt === null) {
+          firstObservedTerminalLossAt = Date.now();
+        } else if (Date.now() - firstObservedTerminalLossAt >= 1000) {
+          return {
+            mode: 'native_split_terminal',
+            attemptId,
+            status: 'paused',
+            terminalPid,
+            startedAt,
+            updatedAt: nowIso(),
+            completedAt: nowIso(),
+            result: {
+              kind: 'pause',
+              reason: 'native terminal lost unexpectedly; manual decision required',
+            },
+            error: 'native terminal lost unexpectedly',
+          };
+        }
+      } else {
+        firstObservedTerminalLossAt = null;
+      }
       await delay(100);
     }
+  }
 
-    return {
-      mode: 'native_split_terminal',
-      attemptId,
-      status: 'failed',
-      terminalPid,
-      startedAt: nowIso(),
-      updatedAt: nowIso(),
-      completedAt: nowIso(),
-      result: {
-        kind: 'fail',
-        message: 'native split terminal timed out without reporting final state',
-      },
-    };
+  private async isTerminalAlive(terminalPid: number): Promise<boolean> {
+    if (this.options.isTerminalProcessAlive) {
+      return await this.options.isTerminalProcessAlive(terminalPid);
+    }
+
+    try {
+      process.kill(terminalPid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async readResumableNativeSession(nodeDir: string): Promise<NativeSessionState | null> {

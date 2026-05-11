@@ -103,6 +103,10 @@ export interface RunState {
   currentNodeId: string | null;
   currentAttemptId?: string | null;
   pendingNodeId: string | null;
+  manualDecisionState?: 'idle' | 'awaiting_codex_intervention';
+  manualDecisionNodeId?: string | null;
+  manualDecisionAttemptId?: string | null;
+  manualDecisionReason?: string | null;
   resumeCount: number;
   recoveryCount?: number;
   recoveryState?: 'idle' | 'awaiting_decision';
@@ -158,8 +162,10 @@ export interface RunnerOptions {
   codexCommand?: string;
   approvalDecision?: 'approve' | 'reject';
   approvalComment?: string;
+  manualDecision?: 'retry-current' | 'continue-next';
   interactiveTerminal?: TerminalSession;
   nativeSplitTerminals?: boolean;
+  isTerminalProcessAlive?: (terminalPid: number) => Promise<boolean> | boolean;
   externalTerminalLauncher?: {
     launch(request: {
       title: string;

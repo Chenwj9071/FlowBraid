@@ -127,6 +127,7 @@ develop:
 当前推荐写法下，`codex` 节点应在 prompt 中明确要求：
 - 任务完成后执行 `flowbraid node complete --outcome ...`
 - 任务失败或无法继续时执行 `flowbraid node fail`
+- 如果需要等待人工输入或外部确认，不要静默退出 native split 终端；应保持终端存活，直到继续执行或显式上报 `pause`
 
 推荐 outcome：
 - `success`：普通任务完成
@@ -138,6 +139,20 @@ develop:
 - 当前 attempt 的最新 outcome 事件
 
 因此推荐把“节点是否完成、走哪条分支”的真源建立在 `runtime-state + outcome` 上，而不是只靠退出码或自然语言结论。
+
+### native split 终端失联处理
+对于 native split 模式下的 `codex` 节点，当前默认行为是：
+- 不使用固定时长硬超时判定失败
+- 只要外部终端仍存活，调度器就继续等待节点显式上报终态
+- 如果外部终端确认失联，run 会暂停在当前 `codex` 节点，等待人工决定下一步
+
+此时不要使用 `recover`，而应使用：
+- `flowbraid resume <run-dir> --decision retry-current`
+- `flowbraid resume <run-dir> --decision continue-next`
+
+适用场景：
+- `retry-current`：终端意外关闭，但你希望重新拉起当前节点再做一次
+- `continue-next`：你确认当前节点结果可以接受，或者希望人工跳过该节点继续往后跑
 
 ### `mode` 历史兼容
 `mode` 当前仍被实现层接受，但已经不是推荐主路径：
@@ -218,6 +233,18 @@ approve:
 - 必须通过 `flowbraid resume <run-dir> --decision approve|reject` 继续
 - `reject` 时当前实现要求带 `--message`
 - 人工反馈会写入 `messages/human-feedback.jsonl`
+
+## 10.1 `resume` 的使用边界
+`resume` 当前有三类正常用途：
+- 继续 `gate` 节点
+- 对 `approval` 节点给出 `approve/reject`
+- 对终端失联的 native split `codex` 节点给出 `retry-current/continue-next`
+
+而 `recover` 只用于：
+- 主调度器异常退出
+- run 进入不一致状态后重新接管
+
+不要把“当前 run 正常 paused，只是等你做决定”的场景交给 `recover`。
 
 ## 11. `end` 节点
 ```yaml

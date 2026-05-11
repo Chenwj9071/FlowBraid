@@ -95,6 +95,8 @@
 - `codex` 节点回流策略默认是 `reentry.mode: resume`
 - `recover` 对 native split `codex` 会优先尝试基于已落盘 `sessionId` 恢复节点会话；其他不确定场景进入人工恢复确认
 - `recover` 是面向异常中断 run 的恢复入口，不是正常 paused 流程的替代命令
+- native split `codex` 节点默认不再使用固定 15 分钟超时失败；只要终端仍存活，就持续等待节点显式上报终态
+- native split `codex` 节点如果终端失联，会把 run 暂停在当前节点，并通过 `resume --decision retry-current|continue-next` 让用户决定重试或跳过到后续节点
 
 ## 最近一次重点改动
 
@@ -129,6 +131,7 @@
   - `nodes/<node-id>/status.json.sessionId`
 - native split 关闭逻辑已从“仅 PID”改为“标题匹配主关窗 + PID 兜底”，关闭命令会使用 `FlowBraid native <node> [<attemptId>]` 作为窗口标题标识
 - 新增 `flowbraid recover <run-dir>`，支持 `retry-current / continue-next / fail-run` 三种人工恢复动作
+- 移除了 native split `codex` 节点的固定 15 分钟超时失败逻辑，改为“终端存活即继续等待，终端失联才进入人工决策暂停”
 
 ## 后续建议
 

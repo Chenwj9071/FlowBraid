@@ -8,6 +8,7 @@ export function buildRunnerOptionsFromFlags(
     codexCommand?: string;
     approvalDecision?: 'approve' | 'reject';
     approvalComment?: string;
+    manualDecision?: 'retry-current' | 'continue-next';
     abortSignal?: AbortSignal;
     interactiveTerminal?: TerminalSession;
     nativeSplitTerminals?: boolean;
@@ -30,6 +31,7 @@ export function buildRunnerOptionsFromFlags(
     codexCommand: extras.codexCommand,
     approvalDecision: extras.approvalDecision,
     approvalComment: extras.approvalComment,
+    manualDecision: extras.manualDecision,
     abortSignal: extras.abortSignal,
     interactiveTerminal: extras.interactiveTerminal,
     logger: extras.logger,

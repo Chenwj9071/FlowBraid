@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { loadWorkflowFile, WorkflowError } from './workflow.js';
 import { loadManifest, loadRunState, loadRunTimeline, persistRunState } from './workspace.js';
 import { resumeWorkflow, sendWorkflow, startWorkflow } from './engine.js';
-import { recoverWorkflow } from './recovery.js';
+import { diagnoseRecovery, recoverWorkflow } from './recovery.js';
 import { RunInterruptedError } from './errors.js';
 import { appendText, nowIso, readJson } from './utils.js';
 import { stabilizeTerminalForPrompt } from './terminal.js';
@@ -37,7 +37,7 @@ function printUsage(): void {
 
 Usage:
   flowbraid run <workflow-file> [--workspace <dir>] [--workdir <dir>] [--codex-command <cmd>] [--interactive] [--pty] [--no-interactive]
-  flowbraid resume <run-dir> [--decision approve|reject] [--message <text>] [--codex-command <cmd>]
+  flowbraid resume <run-dir> [--decision approve|reject|retry-current|continue-next] [--message <text>] [--codex-command <cmd>]
   flowbraid recover <run-dir> [--decision retry-current|continue-next|fail-run] [--message <text>] [--codex-command <cmd>]
   flowbraid send <run-dir> <message> [--codex-command <cmd>]
   flowbraid status <run-dir> [--json]
@@ -234,6 +234,40 @@ async function promptApprovalDecision(runDir: string, abortSignal?: AbortSignal)
   }
 }
 
+async function promptCodexInterventionDecision(
+  runDir: string,
+  abortSignal?: AbortSignal,
+): Promise<{ decision: 'retry-current' | 'continue-next' }> {
+  prepareConsoleForPromptOutput();
+  const { workspace } = await loadManifest(runDir);
+  const state = await loadRunState(workspace);
+  if (state.status !== 'paused' || state.manualDecisionState !== 'awaiting_codex_intervention') {
+    throw new Error('run is not waiting for codex intervention decision');
+  }
+
+  if (state.manualDecisionReason) {
+    process.stdout.write(`${state.manualDecisionReason}\r\n`);
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    while (true) {
+      const answer = await Promise.race([
+        rl.question('处理动作 [retry-current/continue-next]: '),
+        createAbortPromise(abortSignal, () => rl.close()),
+      ]);
+      const normalized = answer.trim().toLowerCase();
+      if (normalized === 'retry-current' || normalized === 'continue-next') {
+        finishPromptLine();
+        return { decision: normalized };
+      }
+      process.stdout.write('please enter retry-current or continue-next\r\n');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function promptGateContinue(promptText: string, abortSignal?: AbortSignal): Promise<void> {
   prepareConsoleForPromptOutput();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -321,6 +355,21 @@ async function runInteractiveWorkflow(
       continue;
     }
 
+    if (currentNode.type === 'codex' && state.manualDecisionState === 'awaiting_codex_intervention') {
+      const manualDecision = await promptCodexInterventionDecision(result.runDir, options.abortSignal);
+      await settleTerminalAfterPrompt();
+      result = await resumeWorkflow(result.runDir, {
+        manualDecision: manualDecision.decision,
+        codexCommand: options.codexCommand,
+        nativeSplitTerminals: options.nativeSplitTerminals,
+        abortSignal: options.abortSignal,
+        interactiveTerminal: { input: process.stdin, output: process.stdout },
+        logger: writeStdoutLine,
+      });
+      options.onRunDir?.(result.runDir);
+      continue;
+    }
+
     if (currentNode.type === 'gate') {
       await promptGateContinue(currentNode.prompt ?? '', options.abortSignal);
       await settleTerminalAfterPrompt();
@@ -360,6 +409,76 @@ async function runInteractiveWorkflow(
 
   console.log(`run ${result.runId} => ${result.status}`);
   console.log(`workspace: ${result.runDir}`);
+  return result;
+}
+
+async function runRecoveredWorkflowInteractively(
+  runDir: string,
+  options: {
+    codexCommand?: string;
+    nativeSplitTerminals?: boolean;
+    abortSignal?: AbortSignal;
+  },
+): Promise<Awaited<ReturnType<typeof recoverWorkflow>>> {
+  let result = await recoverWorkflow(runDir, {
+    codexCommand: options.codexCommand,
+    nativeSplitTerminals: options.nativeSplitTerminals,
+    abortSignal: options.abortSignal,
+    logger: writeStdoutLine,
+  });
+
+  while (result.status === 'paused') {
+    const { workspace, manifest } = await loadManifest(result.runDir);
+    const state = await loadRunState(workspace);
+    const currentNodeId = state.currentNodeId;
+    const currentNode = currentNodeId ? manifest.workflow.nodes[currentNodeId] : null;
+
+    if (!currentNode) {
+      throw new Error(`cannot identify current paused node: ${String(currentNodeId)}`);
+    }
+
+    if (currentNode.type === 'approval') {
+      const approval = await promptApprovalDecision(result.runDir, options.abortSignal);
+      await settleTerminalAfterPrompt();
+      result = await recoverWorkflow(result.runDir, {
+        approvalDecision: approval.decision,
+        approvalComment: approval.comment,
+        codexCommand: options.codexCommand,
+        nativeSplitTerminals: options.nativeSplitTerminals,
+        abortSignal: options.abortSignal,
+        logger: writeStdoutLine,
+      });
+      continue;
+    }
+
+    if (currentNode.type === 'codex' && state.manualDecisionState === 'awaiting_codex_intervention') {
+      const manualDecision = await promptCodexInterventionDecision(result.runDir, options.abortSignal);
+      await settleTerminalAfterPrompt();
+      result = await recoverWorkflow(result.runDir, {
+        manualDecision: manualDecision.decision,
+        codexCommand: options.codexCommand,
+        nativeSplitTerminals: options.nativeSplitTerminals,
+        abortSignal: options.abortSignal,
+        logger: writeStdoutLine,
+      });
+      continue;
+    }
+
+    if (currentNode.type === 'gate') {
+      await promptGateContinue(currentNode.prompt ?? '', options.abortSignal);
+      await settleTerminalAfterPrompt();
+      result = await recoverWorkflow(result.runDir, {
+        codexCommand: options.codexCommand,
+        nativeSplitTerminals: options.nativeSplitTerminals,
+        abortSignal: options.abortSignal,
+        logger: writeStdoutLine,
+      });
+      continue;
+    }
+
+    break;
+  }
+
   return result;
 }
 
@@ -752,6 +871,8 @@ interface StatusSnapshot {
   currentNodeId: string | null;
   pendingNodeId: string | null;
   currentAttemptId?: string | null;
+  manualDecisionState?: string;
+  manualDecisionReason?: string | null;
   reentryMode?: string;
   nodeState?: NodeState | null;
   nativeSession?: NativeSessionState | null;
@@ -786,6 +907,8 @@ async function buildStatusSnapshot(runDir: string): Promise<StatusSnapshot> {
     currentNodeId,
     pendingNodeId: runState.pendingNodeId,
     currentAttemptId: runState.currentAttemptId,
+    manualDecisionState: runState.manualDecisionState,
+    manualDecisionReason: runState.manualDecisionReason,
     reentryMode: currentNode?.type === 'codex' ? currentNode.reentry?.mode ?? 'resume' : undefined,
     nodeState,
     nativeSession,
@@ -801,6 +924,10 @@ function printStatusSnapshot(snapshot: StatusSnapshot): void {
   console.log(`currentNodeId: ${snapshot.currentNodeId ?? 'null'}`);
   console.log(`pendingNodeId: ${snapshot.pendingNodeId ?? 'null'}`);
   console.log(`currentAttemptId: ${snapshot.currentAttemptId ?? 'null'}`);
+  if (snapshot.manualDecisionState && snapshot.manualDecisionState !== 'idle') {
+    console.log(`manualDecisionState: ${snapshot.manualDecisionState}`);
+    console.log(`manualDecisionReason: ${snapshot.manualDecisionReason ?? 'null'}`);
+  }
   if (snapshot.reentryMode) {
     console.log(`reentry.mode: ${snapshot.reentryMode}`);
   }
@@ -937,6 +1064,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       const resolvedRunDir = path.resolve(runDir);
       const decisionFromFlag =
         flags.decision === 'approve' || flags.decision === 'reject' ? (flags.decision as 'approve' | 'reject') : undefined;
+      const manualDecisionFromFlag =
+        flags.decision === 'retry-current' || flags.decision === 'continue-next'
+          ? (flags.decision as 'retry-current' | 'continue-next')
+          : undefined;
       const commentFromFlag = flags.message ? String(flags.message) : undefined;
       const interruptContext = createInterruptContext();
       interruptContext.lastRunDir = resolvedRunDir;
@@ -944,8 +1075,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       try {
         const codexCommand = resolveCodexCommand(flags);
         let decision = decisionFromFlag;
+        let manualDecision = manualDecisionFromFlag;
         let comment = commentFromFlag;
-        if (!decision) {
+        if (!decision && !manualDecision) {
           const { workspace, manifest } = await loadManifest(resolvedRunDir);
           const state = await loadRunState(workspace);
           const currentNode = state.currentNodeId ? manifest.workflow.nodes[state.currentNodeId] : null;
@@ -956,16 +1088,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             const approval = await promptApprovalDecision(resolvedRunDir, interruptContext.controller.signal);
             decision = approval.decision;
             comment = approval.comment;
+          } else if (state.status === 'paused' && currentNode?.type === 'codex' && state.manualDecisionState === 'awaiting_codex_intervention') {
+            const prompted = await promptCodexInterventionDecision(resolvedRunDir, interruptContext.controller.signal);
+            manualDecision = prompted.decision;
           }
         }
         if (decision === 'reject' && !comment) {
           throw new Error('approval reject requires --message');
+        }
+        if (flags.decision && !decision && !manualDecision) {
+          throw new Error('resume --decision must be approve, reject, retry-current, or continue-next');
         }
 
         const result = await resumeWorkflow(resolvedRunDir, {
           ...buildRunnerOptionsFromFlags(flags, {
             approvalDecision: decision,
             approvalComment: comment,
+            manualDecision,
             codexCommand,
             nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
             abortSignal: interruptContext.controller.signal,
@@ -1000,22 +1139,53 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           ? (flags.decision as 'retry-current' | 'continue-next' | 'fail-run')
           : undefined;
       let comment = flags.message ? String(flags.message) : undefined;
+      let approvalDecision =
+        flags.decision === 'approve' || flags.decision === 'reject' ? (flags.decision as 'approve' | 'reject') : undefined;
 
       try {
+        const codexCommand = resolveCodexCommand(flags);
+        const nativeSplitTerminals = resolveNativeSplitPreference(flags, true);
+        const diagnosis = await diagnoseRecovery(resolvedRunDir);
+
+        if (
+          !decision &&
+          !approvalDecision &&
+          diagnosis.kind === 'resume_paused' &&
+          process.stdin.isTTY &&
+          process.stdout.isTTY
+        ) {
+          const result = await runRecoveredWorkflowInteractively(resolvedRunDir, {
+            codexCommand,
+            nativeSplitTerminals,
+            abortSignal: interruptContext.controller.signal,
+          });
+          writeStdoutLine(`run ${result.runId} => ${result.status}`);
+          writeStdoutLine(`workspace: ${result.runDir}`);
+          if (result.status === 'paused') {
+            writeStdoutLine(`current paused node: ${result.currentNodeId}`);
+          }
+          stabilizeTerminalForPrompt({ input: process.stdin, output: process.stdout });
+          return result.status === 'failed' ? 1 : 0;
+        }
+
         if ((decision === 'continue-next' || decision === 'fail-run') && !comment) {
           throw new Error(`${decision} requires --message`);
         }
 
-        if (!decision && process.stdin.isTTY && process.stdout.isTTY) {
-          const prompted = await promptRecoveryDecision(interruptContext.controller.signal);
-          decision = prompted.decision;
-          comment = prompted.comment;
+        if (!decision && !approvalDecision && process.stdin.isTTY && process.stdout.isTTY) {
+          if (!decision && !approvalDecision) {
+            const prompted = await promptRecoveryDecision(interruptContext.controller.signal);
+            decision = prompted.decision;
+            comment = prompted.comment;
+          }
         }
 
         const result = await recoverWorkflow(resolvedRunDir, {
           ...buildRunnerOptionsFromFlags(flags, {
-            codexCommand: resolveCodexCommand(flags),
-            nativeSplitTerminals: resolveNativeSplitPreference(flags, true),
+            approvalDecision,
+            approvalComment: comment,
+            codexCommand,
+            nativeSplitTerminals,
             abortSignal: interruptContext.controller.signal,
             logger: writeStdoutLine,
           }),

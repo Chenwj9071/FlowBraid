@@ -45,6 +45,51 @@ nodes:
     expect(diagnosis.nodeId).toBe('review');
   });
 
+  it('recovers a paused approval run by resuming it with approval decision', async () => {
+    const fixture = await createRecoveryFixture(`
+id: recover-approval
+start: approve
+nodes:
+  approve:
+    type: approval
+    prompt: approve this run
+    transitions:
+      approve: done
+      reject: redo
+  redo:
+    type: end
+    message: redo
+  done:
+    type: end
+    message: done
+`);
+
+    const state = await loadRunState(fixture.workspace);
+    state.status = 'paused';
+    state.currentNodeId = 'approve';
+    state.currentAttemptId = 'attempt-approve-1';
+    state.pendingNodeId = null;
+    await persistRunState(fixture.workspace, state);
+
+    await writeNodeState(fixture.workspace.runDir, 'approve', {
+      nodeId: 'approve',
+      attemptId: 'attempt-approve-1',
+      status: 'paused',
+      startedAt: '2026-05-10T08:00:00.000Z',
+      finishedAt: '2026-05-10T08:01:00.000Z',
+      detail: 'approval pending',
+    });
+
+    const result = await recoverWorkflow(fixture.workspace.runDir, {
+      approvalDecision: 'approve',
+    });
+
+    expect(result.status).toBe('completed');
+    const finalState = await loadRunState(fixture.workspace);
+    expect(finalState.status).toBe('completed');
+    expect(finalState.currentNodeId).toBeNull();
+  });
+
   it('diagnoses native codex with completed runtime-state as finalize_then_continue', async () => {
     const fixture = await createRecoveryFixture(`
 id: recover-finalize
